@@ -23,7 +23,7 @@ class AIGuardiansTesting {
    */
   initializeTestData() {
     return {
-      bias_detection: {
+      biasguard: {
         positive_cases: [
           {
             text: "This product is clearly superior to all competitors and anyone who disagrees is wrong.",
@@ -54,45 +54,103 @@ class AIGuardiansTesting {
           }
         ]
       },
-      toxicity_detection: {
+      trustguard: {
         positive_cases: [
           {
-            text: "You are an idiot and I hate you!",
-            expected_toxicity_score: 0.9,
-            expected_toxicity_type: "insult"
+            text: "This AI system has been trained on biased data and may produce unreliable results.",
+            expected_trust_score: 0.3,
+            expected_trust_type: "low_reliability"
           },
           {
-            text: "This is the worst thing I've ever seen, you should be ashamed.",
-            expected_toxicity_score: 0.8,
-            expected_toxicity_type: "harassment"
+            text: "The model shows signs of overfitting and may not generalize well.",
+            expected_trust_score: 0.4,
+            expected_trust_type: "overfitting_detected"
           }
         ],
         negative_cases: [
           {
-            text: "Thank you for your help, I appreciate it.",
-            expected_toxicity_score: 0.1,
-            expected_toxicity_type: "neutral"
+            text: "This AI system has been thoroughly tested and validated with high accuracy.",
+            expected_trust_score: 0.9,
+            expected_trust_type: "high_reliability"
           }
         ]
       },
-      sentiment_analysis: {
+      contextguard: {
         positive_cases: [
           {
-            text: "I love this new feature, it's amazing!",
-            expected_sentiment: "positive",
-            expected_confidence: 0.9
+            text: "The context has shifted significantly from the original training data.",
+            expected_context_score: 0.2,
+            expected_context_type: "context_drift"
           },
           {
-            text: "This is terrible, I'm very disappointed.",
-            expected_sentiment: "negative",
-            expected_confidence: 0.8
+            text: "This information is outdated and no longer relevant.",
+            expected_context_score: 0.3,
+            expected_context_type: "temporal_drift"
           }
         ],
-        neutral_cases: [
+        negative_cases: [
           {
-            text: "The meeting is scheduled for 3 PM tomorrow.",
-            expected_sentiment: "neutral",
-            expected_confidence: 0.7
+            text: "The context remains consistent with the training data.",
+            expected_context_score: 0.9,
+            expected_context_type: "context_stable"
+          }
+        ]
+      },
+      tokenguard: {
+        positive_cases: [
+          {
+            text: "This is a very long and verbose text that could be optimized for token efficiency.",
+            expected_optimization_score: 0.8,
+            expected_optimization_type: "high_optimization_potential"
+          }
+        ],
+        negative_cases: [
+          {
+            text: "Concise text.",
+            expected_optimization_score: 0.1,
+            expected_optimization_type: "already_optimized"
+          }
+        ]
+      },
+      securityguard: {
+        positive_cases: [
+          {
+            text: "This contains potential security vulnerabilities and should be reviewed.",
+            expected_security_score: 0.8,
+            expected_security_type: "security_risk"
+          },
+          {
+            text: "Suspicious patterns detected in the input data.",
+            expected_security_score: 0.9,
+            expected_security_type: "threat_detected"
+          }
+        ],
+        negative_cases: [
+          {
+            text: "This appears to be safe and secure content.",
+            expected_security_score: 0.1,
+            expected_security_type: "secure"
+          }
+        ]
+      },
+      healthguard: {
+        positive_cases: [
+          {
+            text: "System performance is degrading and requires attention.",
+            expected_health_score: 0.3,
+            expected_health_type: "performance_issue"
+          },
+          {
+            text: "Memory usage is high and may cause system instability.",
+            expected_health_score: 0.4,
+            expected_health_type: "resource_warning"
+          }
+        ],
+        negative_cases: [
+          {
+            text: "System is operating normally with optimal performance.",
+            expected_health_score: 0.9,
+            expected_health_type: "healthy"
           }
         ]
       }

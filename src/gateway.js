@@ -102,29 +102,51 @@ class AIGuardiansGateway {
   }
 
   /**
-   * TRACER BULLET: Initialize guard services
+   * TRACER BULLET: Initialize guard services - All 6 AI Guardians
    */
   async initializeGuardServices() {
     const defaultGuards = {
-      bias_detection: {
+      biasguard: {
         enabled: true,
         threshold: 0.5,
-        pipeline: 'bias_analysis_v2'
+        pipeline: 'bias_analysis_v2',
+        description: 'Bias detection and mitigation',
+        capabilities: ['statistical_bias', 'semantic_bias', 'demographic_bias', 'cultural_bias', 'temporal_bias', 'contextual_bias']
       },
-      toxicity_detection: {
+      trustguard: {
         enabled: true,
         threshold: 0.7,
-        pipeline: 'toxicity_analysis_v1'
+        pipeline: 'trust_analysis_v1',
+        description: 'AI failure pattern detection and reliability analysis',
+        capabilities: ['trust_scoring', 'failure_prediction', 'reliability_assessment']
       },
-      sentiment_analysis: {
-        enabled: false,
+      contextguard: {
+        enabled: true,
         threshold: 0.6,
-        pipeline: 'sentiment_analysis_v1'
+        pipeline: 'context_analysis_v1',
+        description: 'Context drift detection and memory management',
+        capabilities: ['context_analysis', 'drift_detection', 'memory_optimization']
       },
-      fact_checking: {
+      tokenguard: {
         enabled: false,
         threshold: 0.8,
-        pipeline: 'fact_check_v1'
+        pipeline: 'token_optimization_v1',
+        description: 'Token optimization and cost reduction',
+        capabilities: ['token_efficiency', 'cost_optimization', 'usage_analytics']
+      },
+      securityguard: {
+        enabled: true,
+        threshold: 0.9,
+        pipeline: 'security_analysis_v1',
+        description: 'Security threat detection and protection',
+        capabilities: ['threat_detection', 'security_analysis', 'protection_mechanisms']
+      },
+      healthguard: {
+        enabled: false,
+        threshold: 0.7,
+        pipeline: 'health_monitoring_v1',
+        description: 'System health monitoring and diagnostics',
+        capabilities: ['health_checks', 'performance_monitoring', 'system_diagnostics']
       }
     };
 

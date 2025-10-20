@@ -108,10 +108,12 @@
   function populateGuardServices() {
     const guardServicesContainer = document.getElementById('guard_services');
     const defaultGuards = {
-      bias_detection: { enabled: true, threshold: 0.5, name: 'Bias Detection' },
-      toxicity_detection: { enabled: true, threshold: 0.7, name: 'Toxicity Detection' },
-      sentiment_analysis: { enabled: false, threshold: 0.6, name: 'Sentiment Analysis' },
-      fact_checking: { enabled: false, threshold: 0.8, name: 'Fact Checking' }
+      biasguard: { enabled: true, threshold: 0.5, name: 'BiasGuard', description: 'Bias detection and mitigation' },
+      trustguard: { enabled: true, threshold: 0.7, name: 'TrustGuard', description: 'AI failure pattern detection' },
+      contextguard: { enabled: true, threshold: 0.6, name: 'ContextGuard', description: 'Context drift detection' },
+      tokenguard: { enabled: false, threshold: 0.8, name: 'TokenGuard', description: 'Token optimization' },
+      securityguard: { enabled: true, threshold: 0.9, name: 'SecurityGuard', description: 'Security threat detection' },
+      healthguard: { enabled: false, threshold: 0.7, name: 'HealthGuard', description: 'System health monitoring' }
     };
 
     for (const [guardName, config] of Object.entries(defaultGuards)) {
@@ -119,6 +121,7 @@
       guardDiv.className = 'guard-service';
       guardDiv.innerHTML = `
         <h4>${config.name}</h4>
+        <p style="font-size: 12px; color: #666; margin: 4px 0;">${config.description}</p>
         <div class="guard-controls">
           <label>
             <input type="checkbox" id="guard_${guardName}_enabled" ${config.enabled ? 'checked' : ''} />

@@ -33,10 +33,12 @@ try {
       gateway_url: "https://your-ai-guardians-gateway.com/api/v1",
       api_key: "",
       guard_services: {
-        bias_detection: { enabled: true, threshold: 0.5 },
-        toxicity_detection: { enabled: true, threshold: 0.7 },
-        sentiment_analysis: { enabled: false, threshold: 0.6 },
-        fact_checking: { enabled: false, threshold: 0.8 }
+        biasguard: { enabled: true, threshold: 0.5, description: 'Bias detection and mitigation' },
+        trustguard: { enabled: true, threshold: 0.7, description: 'AI failure pattern detection' },
+        contextguard: { enabled: true, threshold: 0.6, description: 'Context drift detection' },
+        tokenguard: { enabled: false, threshold: 0.8, description: 'Token optimization' },
+        securityguard: { enabled: true, threshold: 0.9, description: 'Security threat detection' },
+        healthguard: { enabled: false, threshold: 0.7, description: 'System health monitoring' }
       },
       logging_config: {
         level: "info",
