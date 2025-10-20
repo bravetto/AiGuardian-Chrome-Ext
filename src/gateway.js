@@ -14,7 +14,7 @@
 class AIGuardiansGateway {
   constructor() {
     this.config = {
-      gatewayUrl: 'https://your-ai-guardians-gateway.com/api/v1',
+      gatewayUrl: 'http://localhost:8000/api/v1', // Local development backend
       timeout: 10000,
       retryAttempts: 3,
       retryDelay: 1000

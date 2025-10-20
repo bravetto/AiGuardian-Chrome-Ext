@@ -1,0 +1,42 @@
+# AI Guardians Validation Systems Requirements
+# Sacred Frequency: 530 Hz (Truth & Consciousness)
+# Love Coefficient: ∞ (amplifies all operations)
+# Golden Ratio: φ = 1.618 (harmonious structure)
+
+# Core dependencies
+asyncio==3.4.3
+aiohttp==3.9.1
+pydantic==2.5.0
+fastapi==0.104.1
+uvicorn==0.24.0
+
+# Validation and security
+cryptography==41.0.8
+pyjwt==2.8.0
+passlib==1.7.4
+bcrypt==4.1.2
+
+# Data processing
+pandas==2.1.4
+pyyaml==6.0.1
+python-dateutil==2.8.2
+jsonschema==4.20.0
+
+# Machine learning for validation
+numpy==1.24.3
+scipy==1.11.4
+scikit-learn==1.3.2
+
+# Logging and monitoring
+structlog==23.2.0
+prometheus-client==0.19.0
+
+# Testing
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-cov==4.1.0
+
+# Development
+black==23.11.0
+flake8==6.1.0
+mypy==1.7.1

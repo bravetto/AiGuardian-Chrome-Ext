@@ -1,0 +1,25 @@
+[submodule "template-heaven"]
+	path = template-heaven
+	url = https://github.com/BravettoBackendTeam/template-heaven.git
+[submodule "tokenguard"]
+	path = tokenguard
+	url = https://github.com/bravetto/tokenguard.git
+	branch = feature/migration
+[submodule "trust-guard"]
+	path = trust-guard
+	url = https://github.com/bravetto/trust-guard.git
+	branch = feature/internal-review-preparation
+[submodule "contextguard"]
+	path = contextguard
+	url = https://github.com/bravetto/contextguard.git
+	branch = feature/merge-contextguard-features
+[submodule "biasguard-backend"]
+	path = biasguard-backend
+	url = https://github.com/bravetto/biasguard-backend.git
+[submodule "aiagentsuite"]
+	path = aiagentsuite
+	url = https://github.com/bravetto/ai-agent-suite-prompt-chain
+[submodule "health-guard"]
+	path = health-guard
+	url = https://github.com/bravetto/health-guard.git
+	branch = feature/robust-testing-and-api-fixes
