@@ -76,11 +76,13 @@ headers: {
 
 ### 3. Guard Services Integration
 
-#### Supported Guard Services
-- **Bias Detection** - Identifies biased language and content
-- **Toxicity Detection** - Detects harmful or offensive content
-- **Sentiment Analysis** - Analyzes emotional tone
-- **Fact Checking** - Verifies factual accuracy
+#### Supported Guard Services (All 6 AI Guardians)
+- **BiasGuard** - Bias detection and mitigation (6 algorithms, 89-94% accuracy)
+- **TrustGuard** - AI failure pattern detection and reliability analysis
+- **ContextGuard** - Context drift detection and memory management
+- **TokenGuard** - Token optimization and cost reduction
+- **SecurityGuard** - Security threat detection and protection
+- **HealthGuard** - System health monitoring and diagnostics
 
 #### Guard Service Configuration
 ```javascript

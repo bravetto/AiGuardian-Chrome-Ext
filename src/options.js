@@ -55,9 +55,13 @@
     document.getElementById('log_level').addEventListener('change', updateLoggingConfig);
 
     // Testing
-    document.getElementById('run_tests').addEventListener('click', runGuardServiceTests);
-    document.getElementById('run_performance_tests').addEventListener('click', runPerformanceTests);
+    document.getElementById('run_comprehensive_tests').addEventListener('click', runComprehensiveTests);
+    document.getElementById('run_unit_tests').addEventListener('click', runUnitTests);
+    document.getElementById('run_smoke_tests').addEventListener('click', runSmokeTests);
+    document.getElementById('run_dependency_checks').addEventListener('click', runDependencyChecks);
     document.getElementById('run_integration_tests').addEventListener('click', runIntegrationTests);
+    document.getElementById('run_performance_tests').addEventListener('click', runPerformanceTests);
+    document.getElementById('run_security_tests').addEventListener('click', runSecurityTests);
 
     // Actions
     document.getElementById('save_config').addEventListener('click', saveConfiguration);
@@ -257,6 +261,159 @@
   }
 
   /**
+   * TRACER BULLET: Run comprehensive test suite
+   */
+  async function runComprehensiveTests() {
+    const resultsContainer = document.getElementById('test_results');
+    const progressContainer = document.getElementById('test_progress');
+    const progressBar = document.getElementById('progress_bar');
+    const progressText = document.getElementById('progress_text');
+    
+    resultsContainer.classList.remove('hidden');
+    progressContainer.classList.remove('hidden');
+    resultsContainer.textContent = 'Running comprehensive test suite...';
+    
+    try {
+      // Initialize test runner
+      const testRunner = new AIGuardiansTestRunner();
+      
+      // Update progress
+      progressBar.style.width = '10%';
+      progressText.textContent = 'Initializing test runner...';
+      
+      // Run comprehensive tests
+      progressBar.style.width = '50%';
+      progressText.textContent = 'Running all test categories...';
+      
+      const results = await testRunner.runComprehensiveTests();
+      
+      // Update progress
+      progressBar.style.width = '100%';
+      progressText.textContent = 'Tests completed!';
+      
+      // Display results
+      resultsContainer.innerHTML = `
+        <h4>Comprehensive Test Results</h4>
+        <div style="margin: 16px 0;">
+          <strong>Total Tests:</strong> ${results.total_tests}<br>
+          <strong>Passed:</strong> ${results.passed_tests}<br>
+          <strong>Failed:</strong> ${results.failed_tests}<br>
+          <strong>Success Rate:</strong> ${results.success_rate.toFixed(2)}%<br>
+          <strong>Duration:</strong> ${results.test_duration}ms
+        </div>
+        <details>
+          <summary>Detailed Results</summary>
+          <pre style="margin-top: 16px; font-size: 12px;">${JSON.stringify(results, null, 2)}</pre>
+        </details>
+      `;
+      
+      Logger.info('Comprehensive tests completed', { results });
+    } catch (err) {
+      resultsContainer.textContent = `Comprehensive test failed: ${err.message}`;
+      Logger.error('Comprehensive tests failed', err);
+    }
+  }
+
+  /**
+   * TRACER BULLET: Run unit tests
+   */
+  async function runUnitTests() {
+    const resultsContainer = document.getElementById('test_results');
+    resultsContainer.classList.remove('hidden');
+    resultsContainer.textContent = 'Running unit tests...';
+
+    try {
+      const testRunner = new AIGuardiansTestRunner();
+      const results = await testRunner.runUnitTests();
+      
+      resultsContainer.innerHTML = `
+        <h4>Unit Test Results</h4>
+        <div style="margin: 16px 0;">
+          <strong>Total:</strong> ${results.total}<br>
+          <strong>Passed:</strong> ${results.passed}<br>
+          <strong>Failed:</strong> ${results.failed}<br>
+          <strong>Success Rate:</strong> ${results.success_rate.toFixed(2)}%
+        </div>
+        <details>
+          <summary>Test Details</summary>
+          <pre style="margin-top: 16px; font-size: 12px;">${JSON.stringify(results.results, null, 2)}</pre>
+        </details>
+      `;
+      
+      Logger.info('Unit tests completed', { results });
+    } catch (err) {
+      resultsContainer.textContent = `Unit tests failed: ${err.message}`;
+      Logger.error('Unit tests failed', err);
+    }
+  }
+
+  /**
+   * TRACER BULLET: Run smoke tests
+   */
+  async function runSmokeTests() {
+    const resultsContainer = document.getElementById('test_results');
+    resultsContainer.classList.remove('hidden');
+    resultsContainer.textContent = 'Running smoke tests...';
+
+    try {
+      const testRunner = new AIGuardiansTestRunner();
+      const results = await testRunner.runSmokeTests();
+      
+      resultsContainer.innerHTML = `
+        <h4>Smoke Test Results</h4>
+        <div style="margin: 16px 0;">
+          <strong>Total:</strong> ${results.total}<br>
+          <strong>Passed:</strong> ${results.passed}<br>
+          <strong>Failed:</strong> ${results.failed}<br>
+          <strong>Success Rate:</strong> ${results.success_rate.toFixed(2)}%
+        </div>
+        <details>
+          <summary>Test Details</summary>
+          <pre style="margin-top: 16px; font-size: 12px;">${JSON.stringify(results.results, null, 2)}</pre>
+        </details>
+      `;
+      
+      Logger.info('Smoke tests completed', { results });
+    } catch (err) {
+      resultsContainer.textContent = `Smoke tests failed: ${err.message}`;
+      Logger.error('Smoke tests failed', err);
+    }
+  }
+
+  /**
+   * TRACER BULLET: Run dependency checks
+   */
+  async function runDependencyChecks() {
+    const resultsContainer = document.getElementById('test_results');
+    resultsContainer.classList.remove('hidden');
+    resultsContainer.textContent = 'Running dependency checks...';
+
+    try {
+      const testRunner = new AIGuardiansTestRunner();
+      const results = await testRunner.runDependencyChecks();
+      
+      resultsContainer.innerHTML = `
+        <h4>Dependency Check Results</h4>
+        <div style="margin: 16px 0;">
+          <strong>Total:</strong> ${results.total}<br>
+          <strong>Passed:</strong> ${results.passed}<br>
+          <strong>Failed:</strong> ${results.failed}<br>
+          <strong>Success Rate:</strong> ${results.success_rate.toFixed(2)}%
+        </div>
+        <details>
+          <summary>Check Details</summary>
+          <pre style="margin-top: 16px; font-size: 12px;">${JSON.stringify(results.results, null, 2)}</pre>
+        </details>
+      `;
+      
+      Logger.info('Dependency checks completed', { results });
+    } catch (err) {
+      resultsContainer.textContent = `Dependency checks failed: ${err.message}`;
+      Logger.error('Dependency checks failed', err);
+    }
+  }
+
+  /**
    * TRACER BULLET: Run guard service tests
    */
   async function runGuardServiceTests() {
@@ -285,12 +442,60 @@
     resultsContainer.textContent = 'Running performance tests...';
 
     try {
-      const results = await testingFramework.runPerformanceTests();
-      resultsContainer.textContent = JSON.stringify(results, null, 2);
+      const testRunner = new AIGuardiansTestRunner();
+      const results = await testRunner.runPerformanceTests();
+      
+      resultsContainer.innerHTML = `
+        <h4>Performance Test Results</h4>
+        <div style="margin: 16px 0;">
+          <strong>Total:</strong> ${results.total}<br>
+          <strong>Passed:</strong> ${results.passed}<br>
+          <strong>Failed:</strong> ${results.failed}<br>
+          <strong>Success Rate:</strong> ${results.success_rate.toFixed(2)}%
+        </div>
+        <details>
+          <summary>Performance Details</summary>
+          <pre style="margin-top: 16px; font-size: 12px;">${JSON.stringify(results.results, null, 2)}</pre>
+        </details>
+      `;
+      
       Logger.info('Performance tests completed', { results });
     } catch (err) {
       resultsContainer.textContent = `Performance test failed: ${err.message}`;
       Logger.error('Performance tests failed', err);
+    }
+  }
+
+  /**
+   * TRACER BULLET: Run security tests
+   */
+  async function runSecurityTests() {
+    const resultsContainer = document.getElementById('test_results');
+    resultsContainer.classList.remove('hidden');
+    resultsContainer.textContent = 'Running security tests...';
+
+    try {
+      const testRunner = new AIGuardiansTestRunner();
+      const results = await testRunner.runSecurityTests();
+      
+      resultsContainer.innerHTML = `
+        <h4>Security Test Results</h4>
+        <div style="margin: 16px 0;">
+          <strong>Total:</strong> ${results.total}<br>
+          <strong>Passed:</strong> ${results.passed}<br>
+          <strong>Failed:</strong> ${results.failed}<br>
+          <strong>Success Rate:</strong> ${results.success_rate.toFixed(2)}%
+        </div>
+        <details>
+          <summary>Security Details</summary>
+          <pre style="margin-top: 16px; font-size: 12px;">${JSON.stringify(results.results, null, 2)}</pre>
+        </details>
+      `;
+      
+      Logger.info('Security tests completed', { results });
+    } catch (err) {
+      resultsContainer.textContent = `Security test failed: ${err.message}`;
+      Logger.error('Security tests failed', err);
     }
   }
 

@@ -45,10 +45,11 @@ AI-Guardians-chrome-ext/
 - **Error Handling** and logging throughout
 
 ### ✅ AI Analysis Features
+- **6 AI Guardians Integration** - BiasGuard, TrustGuard, ContextGuard, TokenGuard, SecurityGuard, HealthGuard
 - **Text Selection Analysis** with visual feedback
-- **Bias Score Display** with color-coded results
-- **Mock API Integration** (ready for your AI service)
-- **Configurable Thresholds** via options page
+- **Multi-Guard Analysis** with comprehensive scoring
+- **Central Gateway Integration** (ready for AI Guardians backend)
+- **Configurable Guard Services** via options page
 - **Keyboard Shortcuts** (Ctrl+Shift+A)
 
 ### ✅ Developer Experience
@@ -68,15 +69,16 @@ AI-Guardians-chrome-ext/
    - Update titles and descriptions in HTML files
    - Customize UI colors and styling
 
-### Phase 2: API Integration (30 minutes)
-1. **Replace Mock Analysis**
-   - Update `handleTextAnalysis()` in `src/background.js`
-   - Add your AI service endpoint and authentication
-   - Configure API parameters in options
+### Phase 2: AI Guardians Backend Integration (30 minutes)
+1. **Configure Central Gateway**
+   - Update gateway URL in `src/gateway.js`
+   - Configure authentication for AI Guardians backend
+   - Set up guard service endpoints
 
-2. **Add API Settings**
-   - Extend `src/options.html` with API configuration
-   - Update `src/options.js` to save/load API settings
+2. **Configure Guard Services**
+   - Enable/disable specific guards in options
+   - Set thresholds for each guard service
+   - Configure analysis pipelines
 
 ### Phase 3: Enhanced Features (45 minutes)
 1. **Improve Content Script**

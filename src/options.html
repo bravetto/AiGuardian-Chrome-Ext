@@ -88,9 +88,22 @@
     <!-- Testing Section -->
     <div class="section">
       <h3>Testing & Validation</h3>
-      <button id="run_tests">Run Guard Service Tests</button>
-      <button id="run_performance_tests" class="secondary">Run Performance Tests</button>
-      <button id="run_integration_tests" class="secondary">Run Integration Tests</button>
+      <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px;">
+        <button id="run_comprehensive_tests" style="background: #28a745; color: white;">Run Comprehensive Tests</button>
+        <button id="run_unit_tests" class="secondary">Unit Tests</button>
+        <button id="run_smoke_tests" class="secondary">Smoke Tests</button>
+        <button id="run_dependency_checks" class="secondary">Dependency Checks</button>
+        <button id="run_integration_tests" class="secondary">Integration Tests</button>
+        <button id="run_performance_tests" class="secondary">Performance Tests</button>
+        <button id="run_security_tests" class="secondary">Security Tests</button>
+      </div>
+      
+      <div id="test_progress" class="hidden" style="margin: 16px 0;">
+        <div style="background: #f0f0f0; border-radius: 4px; padding: 4px;">
+          <div id="progress_bar" style="background: #007cba; height: 20px; border-radius: 4px; width: 0%; transition: width 0.3s;"></div>
+        </div>
+        <div id="progress_text" style="text-align: center; margin-top: 8px; font-size: 12px;"></div>
+      </div>
       
       <div id="test_results" class="test-results hidden">
         <!-- Test results will be displayed here -->
@@ -108,6 +121,7 @@
 
     <script src="logging.js"></script>
     <script src="testing.js"></script>
+    <script src="test-runner.js"></script>
     <script src="options.js"></script>
   </body>
 </html>

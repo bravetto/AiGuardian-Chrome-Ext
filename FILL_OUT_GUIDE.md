@@ -34,54 +34,36 @@ chrome://extensions/
 - [ ] **options.html**: Update title and add your settings
 - [ ] **popup.js**: Update button text and functionality
 
-### Phase 2: API Integration (30 minutes)
+### Phase 2: AI Guardians Backend Integration (30 minutes)
 
-#### ✅ Replace Mock Analysis
-**File: `src/background.js`**
+#### ✅ Configure Central Gateway
+**File: `src/gateway.js`**
 ```javascript
-// Find this function and replace the mock implementation:
-function handleTextAnalysis(text, sendResponse) {
-  // TODO: Replace with your actual API call
-  // Example structure provided in the code
-}
+// Update the gateway configuration:
+this.config = {
+  gatewayUrl: 'https://your-ai-guardians-gateway.com/api/v1',
+  apiKey: 'your-api-key',
+  // All 6 guards are pre-configured
+};
 ```
 
-**API Integration Steps:**
-1. **Choose your AI service:**
-   - OpenAI API
-   - Google Cloud AI
-   - Azure Cognitive Services
-   - Custom ML model endpoint
-   - Local analysis service
+**AI Guardians Integration Steps:**
+1. **Deploy AI Guardians Backend:**
+   - CodeGuardians Gateway (FastAPI)
+   - All 6 Guard Services (BiasGuard, TrustGuard, ContextGuard, TokenGuard, SecurityGuard, HealthGuard)
+   - Authentication and monitoring infrastructure
 
-2. **Update the API call:**
+2. **Configure Guard Services:**
 ```javascript
-// Replace the mock code with:
-fetch('https://your-api-endpoint.com/analyze', {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-    'Authorization': 'Bearer YOUR_API_KEY'
-  },
-  body: JSON.stringify({ 
-    text: text,
-    options: {
-      threshold: await getThreshold(),
-      analysis_type: 'bias_detection'
-    }
-  })
-})
-.then(response => response.json())
-.then(data => {
-  sendResponse({ 
-    success: true, 
-    score: data.bias_score,
-    analysis: data.detailed_analysis
-  });
-})
-.catch(err => {
-  sendResponse({ success: false, error: err.message });
-});
+// All 6 guards are ready to use:
+const guards = {
+  biasguard: { enabled: true, threshold: 0.5 },
+  trustguard: { enabled: true, threshold: 0.7 },
+  contextguard: { enabled: true, threshold: 0.6 },
+  tokenguard: { enabled: false, threshold: 0.8 },
+  securityguard: { enabled: true, threshold: 0.9 },
+  healthguard: { enabled: false, threshold: 0.7 }
+};
 ```
 
 #### ✅ Add API Configuration
