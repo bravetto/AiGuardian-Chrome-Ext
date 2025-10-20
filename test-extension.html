@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AI Guardians Extension Test Page</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; line-height: 1.6; }
+        .test-section { margin: 20px 0; padding: 20px; border: 1px solid #ddd; border-radius: 8px; }
+        .test-text { background: #f5f5f5; padding: 15px; margin: 10px 0; border-radius: 4px; }
+        .instructions { background: #e7f3ff; padding: 15px; border-radius: 4px; margin: 20px 0; }
+        h1 { color: #333; }
+        h2 { color: #666; }
+    </style>
+</head>
+<body>
+    <h1>🧪 AI Guardians Chrome Extension Test Page</h1>
+    
+    <div class="instructions">
+        <h2>📋 Testing Instructions</h2>
+        <ol>
+            <li><strong>Load the Extension:</strong> Go to chrome://extensions/, enable Developer mode, click "Load unpacked" and select this directory</li>
+            <li><strong>Test Text Selection:</strong> Select any text below and wait for the bias analysis badge to appear</li>
+            <li><strong>Test Options:</strong> Click the extension icon and then "Open Options" to test the configuration interface</li>
+            <li><strong>Test All Guards:</strong> In options, click "Run Comprehensive Tests" to test all 6 AI Guardians</li>
+        </ol>
+    </div>
+
+    <div class="test-section">
+        <h2>🎯 Test Cases for BiasGuard</h2>
+        
+        <div class="test-text">
+            <strong>Neutral Text (Should score low):</strong><br>
+            The weather today is sunny with a temperature of 75 degrees. This is a factual statement about current conditions.
+        </div>
+        
+        <div class="test-text">
+            <strong>Potentially Biased Text (Should score higher):</strong><br>
+            This product is clearly superior to all competitors and anyone who disagrees is wrong. Women are naturally better at cooking than men.
+        </div>
+        
+        <div class="test-text">
+            <strong>Political Bias Test:</strong><br>
+            All politicians are corrupt liars who only care about money and power. The other party is completely wrong about everything.
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>🔒 Test Cases for TrustGuard</h2>
+        
+        <div class="test-text">
+            <strong>Low Trust Content:</strong><br>
+            This AI system has been trained on biased data and may produce unreliable results. The model shows signs of overfitting.
+        </div>
+        
+        <div class="test-text">
+            <strong>High Trust Content:</strong><br>
+            This AI system has been thoroughly tested and validated with high accuracy. The model demonstrates excellent performance.
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>🧠 Test Cases for ContextGuard</h2>
+        
+        <div class="test-text">
+            <strong>Context Drift:</strong><br>
+            The context has shifted significantly from the original training data. This information is outdated and no longer relevant.
+        </div>
+        
+        <div class="test-text">
+            <strong>Stable Context:</strong><br>
+            The context remains consistent with the training data. This information is current and relevant.
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>💰 Test Cases for TokenGuard</h2>
+        
+        <div class="test-text">
+            <strong>Verbose Text (High optimization potential):</strong><br>
+            This is a very long and verbose text that could be optimized for token efficiency. It contains many unnecessary words and phrases that could be shortened or removed entirely to improve the overall efficiency of the text processing system.
+        </div>
+        
+        <div class="test-text">
+            <strong>Concise Text (Already optimized):</strong><br>
+            Concise text.
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>🔐 Test Cases for SecurityGuard</h2>
+        
+        <div class="test-text">
+            <strong>Security Risk:</strong><br>
+            This contains potential security vulnerabilities and should be reviewed. Suspicious patterns detected in the input data.
+        </div>
+        
+        <div class="test-text">
+            <strong>Secure Content:</strong><br>
+            This appears to be safe and secure content with no security concerns.
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>🏥 Test Cases for HealthGuard</h2>
+        
+        <div class="test-text">
+            <strong>Performance Issues:</strong><br>
+            System performance is degrading and requires attention. Memory usage is high and may cause system instability.
+        </div>
+        
+        <div class="test-text">
+            <strong>Healthy System:</strong><br>
+            System is operating normally with optimal performance and stable resource usage.
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>✅ Expected Results</h2>
+        <ul>
+            <li><strong>Text Selection:</strong> When you select text, you should see a colored badge appear in the bottom-right corner</li>
+            <li><strong>Bias Scores:</strong> Green (low bias), Orange (medium bias), Red (high bias)</li>
+            <li><strong>Analysis Details:</strong> Click the badge to see detailed analysis results</li>
+            <li><strong>Options Page:</strong> Should show all 6 guard services with configuration options</li>
+            <li><strong>Testing Interface:</strong> Should run comprehensive tests for all components</li>
+        </ul>
+    </div>
+
+    <div class="test-section">
+        <h2>🐛 Troubleshooting</h2>
+        <ul>
+            <li><strong>Extension won't load:</strong> Check that all files are present and manifest.json is valid</li>
+            <li><strong>No analysis badge:</strong> Make sure you select at least 10 characters of text</li>
+            <li><strong>Options page errors:</strong> Check browser console for JavaScript errors</li>
+            <li><strong>Tests fail:</strong> Check that all dependencies are properly loaded</li>
+        </ul>
+    </div>
+
+    <script>
+        // Add some interactive testing
+        console.log('🧪 AI Guardians Test Page Loaded');
+        console.log('📝 Select any text above to test the extension');
+        console.log('🔧 Open chrome://extensions/ to load the extension');
+        
+        // Test if extension is loaded
+        setTimeout(() => {
+            if (typeof chrome !== 'undefined' && chrome.runtime) {
+                console.log('✅ Chrome extension APIs available');
+            } else {
+                console.log('❌ Chrome extension APIs not available');
+            }
+        }, 1000);
+    </script>
+</body>
+</html>
