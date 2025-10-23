@@ -1,0 +1,83 @@
+{
+  "summary": {
+    "totalTests": 6,
+    "passedTests": 3,
+    "failedTests": 3,
+    "successRate": 50,
+    "duration": 9
+  },
+  "results": [
+    {
+      "name": "File Structure Validation",
+      "status": "FAILED",
+      "error": "Missing required files: manifest.json, src/background.js, src/content.js, src/gateway.js, src/popup.html, src/popup.js, src/options.html, src/options.js, src/testing.js",
+      "timestamp": "2025-10-22T18:54:18.995Z"
+    },
+    {
+      "name": "Manifest Validation",
+      "status": "FAILED",
+      "error": "manifest.json not found",
+      "timestamp": "2025-10-22T18:54:18.997Z"
+    },
+    {
+      "name": "Code Quality Check",
+      "status": "PASSED",
+      "result": {
+        "src/background.js": {
+          "status": "missing",
+          "error": "File not found"
+        },
+        "src/content.js": {
+          "status": "missing",
+          "error": "File not found"
+        },
+        "src/gateway.js": {
+          "status": "missing",
+          "error": "File not found"
+        },
+        "src/popup.js": {
+          "status": "missing",
+          "error": "File not found"
+        },
+        "src/options.js": {
+          "status": "missing",
+          "error": "File not found"
+        },
+        "src/testing.js": {
+          "status": "missing",
+          "error": "File not found"
+        }
+      },
+      "timestamp": "2025-10-22T18:54:18.997Z"
+    },
+    {
+      "name": "API Schema Compatibility",
+      "status": "FAILED",
+      "error": "gateway.js not found",
+      "timestamp": "2025-10-22T18:54:18.998Z"
+    },
+    {
+      "name": "Security Analysis",
+      "status": "PASSED",
+      "result": {
+        "totalIssues": 0,
+        "issues": [],
+        "securityScore": 100
+      },
+      "timestamp": "2025-10-22T18:54:18.998Z"
+    },
+    {
+      "name": "Performance Analysis",
+      "status": "PASSED",
+      "result": {},
+      "timestamp": "2025-10-22T18:54:18.998Z"
+    }
+  ],
+  "timestamp": "2025-10-22T18:54:18.999Z",
+  "recommendations": [
+    "Fix failed tests before deployment",
+    "Run extension in Chrome developer mode for manual testing",
+    "Test with real backend API endpoints",
+    "Validate all guard services are working correctly"
+  ]
+}
