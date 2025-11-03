@@ -372,20 +372,26 @@ try {
     try {
       Logger.info("[BG] Text analysis request received:", text?.substring(0, 50) + "...");
       
-      // TRACER BULLET: Mock analysis for immediate functionality
-      const mockAnalysis = generateMockAnalysis(text);
-      Logger.info("[BG] Mock analysis generated:", mockAnalysis);
-      
-      // Save to analysis history
-      saveToHistory(text, mockAnalysis);
-      
-      // Save as last analysis for copy feature
-      chrome.storage.local.set({ last_analysis: mockAnalysis });
-      
-      // Simulate network delay for realism
-      setTimeout(() => {
-        sendResponse(mockAnalysis);
-      }, 500 + Math.random() * 1000); // 500-1500ms delay
+      // TRACER BULLET: Use AI Guardians Gateway for analysis
+      try {
+        const analysisResult = await gateway.analyzeText(text);
+        Logger.info("[BG] Analysis result received:", analysisResult);
+
+        // Save to analysis history
+        saveToHistory(text, analysisResult);
+
+        // Save as last analysis for copy feature
+        chrome.storage.local.set({ last_analysis: analysisResult });
+
+        sendResponse(analysisResult);
+      } catch (error) {
+        Logger.error("[BG] Gateway analysis failed:", error);
+        sendResponse({
+          success: false,
+          error: "Failed to analyze text with the gateway.",
+          details: error.message,
+        });
+      }
       
     } catch (err) {
       Logger.error("[BG] Analysis failed:", err);
