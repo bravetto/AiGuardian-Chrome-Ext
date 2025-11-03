@@ -93,6 +93,8 @@ ai-guardian/
 - **Context Integration**: Web search and fact-checking tools
 - **Keyboard Shortcuts**: Quick access to features
 - **Configuration UI**: Easy settings management
+- **Subscription Management**: Real-time subscription status and usage tracking
+- **Usage Limits**: Automatic request blocking when limits exceeded
 
 ## 🔧 Development
 
