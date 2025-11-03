@@ -58,7 +58,8 @@ The Chrome extension provides browser-based AI content analysis with visual feed
 - **Keyboard Shortcuts**: `Ctrl+Shift+A` for quick analysis
 - **Analysis History**: Track and review past analyses
 
-**[📚 Extension Documentation](DEVELOPER_GUIDE.md)** - Development and user guides
+**[📚 Extension Documentation](DEVELOPER_GUIDE.md)** - Development and user guides  
+**[🔌 Backend Integration Guide](docs/BACKEND_INTEGRATION_GUIDE.md)** - Complete API integration reference
 
 ## 📁 Project Structure
 
