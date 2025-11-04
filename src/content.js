@@ -83,13 +83,13 @@
       { type: "ANALYZE_TEXT", payload: selectionText },
       (response) => {
         if (chrome.runtime.lastError) {
-          Logger.error("[CS] Runtime error:", chrome.runtime.lastError);
+          console.error("[CS] Runtime error:", chrome.runtime.lastError);
           showBadge(ERROR_MESSAGES.ANALYSIS_FAILED, "error");
           return;
         }
 
         if (!response || !response.success) {
-          Logger.error("[CS] Analysis failed:", response?.error);
+          console.error("[CS] Analysis failed:", response?.error);
           showBadge(ERROR_MESSAGES.ANALYSIS_FAILED, "error");
           return;
         }
@@ -258,7 +258,7 @@
    * TRACER BULLET: Detailed analysis modal (placeholder)
    */
   function showDetailedAnalysis(response) {
-    Logger.info("[CS] Detailed analysis:", response);
+    console.log("[CS] Detailed analysis:", response);
     alert(`Detailed Analysis:\nScore: ${Math.round(response.score * 100)}%\nType: ${response.analysis?.bias_type || 'Unknown'}`);
   }
 
