@@ -534,7 +534,8 @@
         refreshAuthBtn.style.display = 'inline-block';
       }
       
-      // Hide main content and analysis section when not authenticated
+      // Show main content (contains status section and guard services - should be visible to all)
+      // Only hide analysis section when not authenticated
       if (mainContent) {
         mainContent.style.display = 'block';
       }
@@ -708,6 +709,64 @@
       console.log('[Popup] Sign In button listener attached');
     } else {
       console.error('[Popup] ERROR: signInBtn not found in DOM!');
+    }
+
+    // Refresh Auth button - shown when not authenticated
+    const refreshAuthBtn = document.getElementById('refreshAuthBtn');
+    if (refreshAuthBtn) {
+      console.log('[Popup] Found refreshAuthBtn, attaching listener');
+      const clickHandler = async () => {
+        try {
+          refreshAuthBtn.textContent = '⏳ Checking...';
+          refreshAuthBtn.disabled = true;
+          
+          // Re-check auth state
+          if (auth) {
+            await auth.checkUserSession();
+          } else {
+            // If auth not initialized, try to initialize it
+            try {
+              auth = new AiGuardianAuth();
+              await auth.initialize();
+              await auth.checkUserSession();
+            } catch (err) {
+              Logger.error('Failed to initialize auth on refresh', err);
+              if (errorHandler) {
+                errorHandler.showError('AUTH_NOT_CONFIGURED');
+              } else {
+                showFallbackError('Authentication not configured. Please check settings.');
+              }
+              return;
+            }
+          }
+          
+          // Update UI to reflect current auth state
+          await updateAuthUI();
+          
+          // Show success message if now authenticated
+          if (auth && auth.isAuthenticated()) {
+            showSuccess('✅ Authentication refreshed');
+          } else {
+            showSuccess('ℹ️ Still not authenticated. Please sign in.');
+          }
+        } catch (err) {
+          Logger.error('Failed to refresh auth', err);
+          if (errorHandler) {
+            errorHandler.showError('AUTH_REFRESH_FAILED');
+          } else {
+            showFallbackError('Failed to refresh authentication. Please try again.');
+          }
+        } finally {
+          refreshAuthBtn.textContent = '🔄 Refresh Auth';
+          refreshAuthBtn.disabled = false;
+        }
+      };
+      
+      refreshAuthBtn.addEventListener('click', clickHandler);
+      eventListeners.push({ element: refreshAuthBtn, event: 'click', handler: clickHandler });
+      console.log('[Popup] Refresh Auth button listener attached');
+    } else {
+      console.warn('[Popup] refreshAuthBtn not found in DOM');
     }
 
     // Sign Up button
