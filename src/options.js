@@ -461,6 +461,162 @@
     }
   }
 
+  /**
+   * Check auth state for debugging
+   */
+  async function checkAuthState() {
+    const output = document.getElementById('auth_debug_output');
+    if (!output) return;
+    
+    output.style.display = 'block';
+    output.textContent = 'Checking auth state...\n';
+    
+    try {
+      // Check storage
+      const syncData = await new Promise(resolve => {
+        chrome.storage.sync.get(['clerk_publishable_key', 'gateway_url', 'clerk_key_source'], resolve);
+      });
+      
+      const localData = await new Promise(resolve => {
+        chrome.storage.local.get(['clerk_user', 'clerk_token'], resolve);
+      });
+      
+      let debug = '=== AUTH STATE DEBUG ===\n\n';
+      debug += 'SYNC STORAGE:\n';
+      debug += `  Clerk Key: ${syncData.clerk_publishable_key ? syncData.clerk_publishable_key.substring(0, 20) + '...' : 'NOT SET'}\n`;
+      debug += `  Gateway URL: ${syncData.gateway_url || 'NOT SET'}\n`;
+      debug += `  Key Source: ${syncData.clerk_key_source || 'unknown'}\n\n`;
+      
+      debug += 'LOCAL STORAGE:\n';
+      debug += `  Clerk User: ${localData.clerk_user ? JSON.stringify(localData.clerk_user, null, 2) : 'NOT SET'}\n`;
+      debug += `  Clerk Token: ${localData.clerk_token ? localData.clerk_token.substring(0, 20) + '...' : 'NOT SET'}\n\n`;
+      
+      // Test getSettings() directly
+      debug += '=== TESTING getSettings() ===\n';
+      try {
+        const auth = new AiGuardianAuth();
+        const settings = await auth.getSettings();
+        debug += `getSettings() returned:\n`;
+        debug += `  Key: ${settings.clerk_publishable_key ? settings.clerk_publishable_key.substring(0, 20) + '...' : 'null'}\n`;
+        debug += `  Source: ${settings.source || 'unknown'}\n\n`;
+      } catch (e) {
+        debug += `getSettings() ERROR: ${e.message}\n`;
+      }
+
+      // Try to initialize auth
+      debug += '=== INITIALIZING AUTH ===\n';
+      try {
+        const auth = new AiGuardianAuth();
+        
+        // Capture console errors during initialization
+        const consoleErrors = [];
+        const originalError = console.error;
+        console.error = (...args) => {
+          consoleErrors.push(args.map(arg => typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)).join(' '));
+          originalError.apply(console, args);
+        };
+        
+        const initialized = await auth.initialize();
+        
+        // Restore console.error
+        console.error = originalError;
+        
+        debug += `Initialized: ${initialized}\n`;
+        debug += `isInitialized: ${auth.isInitialized}\n`;
+        debug += `hasClerk: ${!!auth.clerk}\n`;
+        debug += `publishableKey: ${auth.publishableKey ? auth.publishableKey.substring(0, 20) + '...' : 'null'}\n`;
+        debug += `user: ${auth.user ? JSON.stringify({id: auth.user.id, email: auth.user.emailAddresses?.[0]?.emailAddress}, null, 2) : 'null'}\n`;
+        
+        if (!initialized) {
+          debug += `\n⚠️ Auth failed to initialize - checking why...\n`;
+          debug += `  publishableKey from getSettings: ${auth.publishableKey ? 'present' : 'missing'}\n`;
+          debug += `  Clerk SDK loaded: ${typeof window.Clerk !== 'undefined' ? 'yes' : 'no'}\n`;
+          debug += `  Clerk instance type: ${typeof window.Clerk}\n`;
+          debug += `  Clerk has load method: ${typeof window.Clerk?.load === 'function' ? 'yes' : 'no'}\n`;
+          
+          if (consoleErrors.length > 0) {
+            debug += `\n❌ Console Errors During Initialization:\n`;
+            consoleErrors.forEach((err, idx) => {
+              debug += `  [${idx + 1}] ${err}\n`;
+            });
+          } else {
+            debug += `\n⚠️ No console errors captured - check browser console (F12) for details\n`;
+          }
+        }
+        
+        // Test sign-up URL generation
+        if (initialized && auth.publishableKey) {
+          const redirectUrl = chrome.runtime.getURL('/src/clerk-callback.html');
+          // Use the auth helper method to build the correct instance-specific URL
+          const signUpUrl = auth.buildClerkInstanceUrl(auth.publishableKey, 'sign-up', redirectUrl);
+          if (signUpUrl) {
+            debug += `\nSign-Up URL:\n${signUpUrl}\n`;
+          } else {
+            // Fallback if extraction fails
+            const keyParts = auth.publishableKey.split('_');
+            const keyType = keyParts.length >= 2 ? keyParts[1] : 'test';
+            const baseDomain = keyType === 'test' ? 'accounts.dev' : 'clerk.accounts.dev';
+            const fallbackUrl = `https://${baseDomain}/sign-up?__clerk_publishable_key=${encodeURIComponent(auth.publishableKey)}&redirect_url=${encodeURIComponent(redirectUrl)}`;
+            debug += `\nSign-Up URL (fallback):\n${fallbackUrl}\n`;
+          }
+        } else if (!auth.publishableKey) {
+          debug += `\n❌ Cannot generate sign-up URL - publishableKey is missing\n`;
+        } else if (!initialized) {
+          debug += `\n⚠️ Cannot generate sign-up URL - initialization failed (but sign-up should still work with on-demand init)\n`;
+        }
+      } catch (e) {
+        debug += `ERROR: ${e.message}\n`;
+        debug += `Stack: ${e.stack}\n`;
+      }
+      
+      output.textContent = debug;
+    } catch (error) {
+      output.textContent = `ERROR: ${error.message}\n${error.stack}`;
+    }
+  }
+
+  /**
+   * Test sign-up flow
+   */
+  async function testSignUpFlow() {
+    const output = document.getElementById('auth_debug_output');
+    if (!output) return;
+    
+    output.style.display = 'block';
+    output.textContent = 'Testing sign-up flow...\n';
+    
+    try {
+      const auth = new AiGuardianAuth();
+      const initialized = await auth.initialize();
+      
+      if (!initialized) {
+        output.textContent = 'ERROR: Auth failed to initialize';
+        return;
+      }
+      
+      output.textContent += `Auth initialized: ${initialized}\n`;
+      output.textContent += `Calling auth.signUp()...\n`;
+      
+      await auth.signUp();
+      output.textContent += 'SUCCESS: auth.signUp() completed\n';
+      output.textContent += 'Check if new tab opened with Clerk sign-up page\n';
+    } catch (error) {
+      output.textContent += `ERROR: ${error.message}\n`;
+      output.textContent += `Stack: ${error.stack}\n`;
+      console.error('Sign-up test error:', error);
+    }
+  }
+
+  /**
+   * Clear debug output
+   */
+  function clearDebugOutput() {
+    const output = document.getElementById('auth_debug_output');
+    if (output) {
+      output.textContent = '';
+      output.style.display = 'none';
+    }
+  }
 
   // Cleanup on page unload
   window.addEventListener('beforeunload', cleanupEventListeners);

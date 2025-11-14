@@ -457,6 +457,8 @@
 
     const userProfile = document.getElementById('userProfile');
     const authButtons = document.getElementById('authButtons');
+    const syncAuthBtn = document.getElementById('syncAuthBtn');
+    const refreshAuthBtn = document.getElementById('refreshAuthBtn');
     const userAvatar = document.getElementById('userAvatar');
     const userName = document.getElementById('userName');
     const mainContent = document.querySelector('.main-content');
@@ -508,6 +510,8 @@
 
       userProfile.style.display = 'flex';
       authButtons.style.display = 'none';
+      if (syncAuthBtn) syncAuthBtn.style.display = 'none';
+      if (refreshAuthBtn) refreshAuthBtn.style.display = 'none';
       
       // Show main content and analysis section when authenticated
       if (mainContent) {
@@ -521,8 +525,16 @@
       userProfile.style.display = 'none';
       authButtons.style.display = 'flex';
       
-      // Show main content (contains status section and guard services - should be visible to all)
-      // Only hide analysis section when not authenticated
+      // Show sync button if user might have signed in on Clerk's page
+      if (syncAuthBtn) {
+        syncAuthBtn.style.display = 'inline-block';
+      }
+      // Show refresh button to manually check for auth
+      if (refreshAuthBtn) {
+        refreshAuthBtn.style.display = 'inline-block';
+      }
+      
+      // Hide main content and analysis section when not authenticated
       if (mainContent) {
         mainContent.style.display = 'block';
       }
