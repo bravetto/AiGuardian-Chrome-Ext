@@ -112,7 +112,9 @@
       });
       
       if (storageCheck) {
-        Logger.info('[Popup] Found stored user, will update UI after Clerk init');
+        Logger.info('[Popup] ✅ Found stored user:', storageCheck.id);
+        // Update UI immediately if we have stored user
+        await updateAuthUI();
       } else {
         Logger.info('[Popup] No stored user found');
       }
@@ -165,18 +167,50 @@
       // Listen for auth callback success and errors
       if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
         chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+          Logger.info('[Popup] Message received:', request.type);
+          
           if (request.type === 'AUTH_CALLBACK_SUCCESS' || request.type === 'CLERK_AUTH_DETECTED') {
-            // Reload auth state when callback succeeds or auth is detected
-            if (auth) {
-              auth.checkUserSession().then(() => {
-                updateAuthUI();
+            Logger.info('[Popup] 🔔 Auth callback success detected! Reloading auth state...');
+            // Immediately check storage first (fastest)
+            chrome.storage.local.get(['clerk_user'], async (data) => {
+              if (data.clerk_user) {
+                Logger.info('[Popup] ✅ User found in storage:', data.clerk_user.id);
+                // Update UI immediately from storage
+                await updateAuthUI();
+                
+                // Then sync with Clerk if auth object exists
+                if (auth) {
+                  try {
+                    await auth.checkUserSession();
+                    await updateAuthUI();
+                  } catch (e) {
+                    Logger.warn('[Popup] Error syncing with Clerk, but UI updated from storage:', e);
+                  }
+                }
+                
                 // Stop periodic checking if we're now authenticated
                 if (authCheckInterval) {
                   clearInterval(authCheckInterval);
                   authCheckInterval = null;
                 }
-              });
-            }
+              } else {
+                // No storage yet, try to reload auth state
+                Logger.info('[Popup] No storage yet, checking auth state...');
+                if (auth) {
+                  auth.checkUserSession().then(() => {
+                    updateAuthUI();
+                    // Stop periodic checking if we're now authenticated
+                    if (authCheckInterval) {
+                      clearInterval(authCheckInterval);
+                      authCheckInterval = null;
+                    }
+                  });
+                }
+              }
+            });
+            
+            // Return true to indicate we'll respond asynchronously
+            return true;
           } else if (request.type === 'AUTH_ERROR') {
             // Handle auth errors from background/service worker
             Logger.error('[Popup] Auth error received:', request.error);
