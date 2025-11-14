@@ -22,25 +22,62 @@
   function initialize() {
     try {
       initializePopup();
-      initializeErrorHandler();
-      setupEventListeners(); // Set up button handlers first
-      initializeAuth();
-      initializeOnboarding();
-      loadSystemStatus();
-      loadGuardServices();
-      loadSubscriptionStatus();
+      
+      // CRITICAL: Set up event listeners FIRST, before anything else that might fail
+      // This ensures buttons work even if other initialization fails
+      setupEventListeners();
+      
+      // Initialize error handler (defensive - won't fail if class not available)
+      try {
+        initializeErrorHandler();
+      } catch (err) {
+        console.error('Error handler initialization failed (non-critical):', err);
+        // Continue without error handler - buttons will still work
+      }
+      
+      // Initialize auth (defensive - won't fail initialization)
+      try {
+        initializeAuth();
+      } catch (err) {
+        console.error('Auth initialization failed (non-critical):', err);
+        // Continue - user can still use buttons
+      }
+      
+      // Initialize onboarding (defensive)
+      try {
+        initializeOnboarding();
+      } catch (err) {
+        console.error('Onboarding initialization failed (non-critical):', err);
+      }
+      
+      // Load status (defensive)
+      try {
+        loadSystemStatus();
+        loadGuardServices();
+        loadSubscriptionStatus();
+      } catch (err) {
+        console.error('Status loading failed (non-critical):', err);
+      }
       
       // Check for issues and show diagnostic panel if needed
       setTimeout(async () => {
-        await checkForIssues();
+        try {
+          await checkForIssues();
+        } catch (err) {
+          console.error('Issue check failed (non-critical):', err);
+        }
       }, 1000);
     } catch (err) {
-      Logger.error('Popup init error', err);
       console.error('Popup initialization error:', err);
-      // Fallback error display if error handler not initialized
-      showFallbackError('Extension failed to load properly. Please refresh and try again.');
-      // Show diagnostic panel on init error
-      setTimeout(() => showDiagnosticPanel(), 500);
+      // Even if initialization fails, try to show error
+      try {
+        Logger.error('Popup init error', err);
+        showFallbackError('Extension failed to load properly. Please refresh and try again.');
+        setTimeout(() => showDiagnosticPanel(), 500);
+      } catch (fallbackErr) {
+        // Last resort - just log to console
+        console.error('Even fallback error display failed:', fallbackErr);
+      }
     }
   }
 
@@ -60,11 +97,50 @@
   }
 
   /**
-   * Initialize error handler
+   * Initialize error handler (defensive - checks if class exists)
    */
   function initializeErrorHandler() {
-    errorHandler = new AiGuardianErrorHandler();
-    Logger.info('Error handler initialized');
+    if (typeof AiGuardianErrorHandler === 'undefined') {
+      console.warn('AiGuardianErrorHandler class not available - error handler not initialized');
+      // Create a minimal fallback error handler
+      errorHandler = {
+        showError: function(type) {
+          console.error('Error:', type);
+          showFallbackError('An error occurred: ' + type);
+        },
+        showErrorFromException: function(err) {
+          console.error('Exception:', err);
+          showFallbackError('An error occurred: ' + (err.message || 'Unknown error'));
+        },
+        showLegacyError: function(message) {
+          console.error('Legacy error:', message);
+          showFallbackError(message);
+        }
+      };
+      return;
+    }
+    
+    try {
+      errorHandler = new AiGuardianErrorHandler();
+      Logger.info('Error handler initialized');
+    } catch (err) {
+      console.error('Failed to instantiate error handler:', err);
+      // Create fallback
+      errorHandler = {
+        showError: function(type) {
+          console.error('Error:', type);
+          showFallbackError('An error occurred: ' + type);
+        },
+        showErrorFromException: function(err) {
+          console.error('Exception:', err);
+          showFallbackError('An error occurred: ' + (err.message || 'Unknown error'));
+        },
+        showLegacyError: function(message) {
+          console.error('Legacy error:', message);
+          showFallbackError(message);
+        }
+      };
+    }
   }
 
   /**
@@ -106,8 +182,19 @@
       // FIRST: Check storage directly for any existing auth (bypasses Clerk initialization)
       Logger.info('[Popup] Checking storage for existing auth before initializing...');
       const storageCheck = await new Promise((resolve) => {
-        chrome.storage.local.get(['clerk_user'], (data) => {
-          resolve(data.clerk_user || null);
+        chrome.storage.local.get(['clerk_user', 'clerk_token'], (data) => {
+          if (chrome.runtime.lastError) {
+            Logger.error('[Popup] Storage read error:', chrome.runtime.lastError);
+            resolve(null);
+          } else {
+            Logger.info('[Popup] Storage check result:', {
+              hasUser: !!data.clerk_user,
+              hasToken: !!data.clerk_token,
+              userId: data.clerk_user?.id,
+              email: data.clerk_user?.email
+            });
+            resolve(data.clerk_user || null);
+          }
         });
       });
       
@@ -116,7 +203,7 @@
         // Update UI immediately if we have stored user
         await updateAuthUI();
       } else {
-        Logger.info('[Popup] No stored user found');
+        Logger.info('[Popup] No stored user found in initial check');
       }
       
       auth = new AiGuardianAuth();
@@ -129,7 +216,11 @@
         await updateAuthUI();
       } else {
         Logger.warn('[Popup] Authentication not configured');
-        errorHandler.showError('AUTH_NOT_CONFIGURED');
+        if (errorHandler) {
+          errorHandler.showError('AUTH_NOT_CONFIGURED');
+        } else {
+          showFallbackError('Authentication not configured. Please check settings.');
+        }
         // Show diagnostic panel if auth fails
         showDiagnosticPanel();
       }
@@ -170,9 +261,28 @@
           Logger.info('[Popup] Message received:', request.type);
           
           if (request.type === 'AUTH_CALLBACK_SUCCESS' || request.type === 'CLERK_AUTH_DETECTED') {
-            Logger.info('[Popup] 🔔 Auth callback success detected! Reloading auth state...');
+            Logger.info('[Popup] 🔔 Auth callback success detected! Reloading auth state...', {
+              messageType: request.type,
+              hasUserInMessage: !!request.user,
+              userId: request.user?.id
+            });
+            
+            // Wait a moment for storage to be written (callback page writes first, then sends message)
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
             // Immediately check storage first (fastest)
-            chrome.storage.local.get(['clerk_user'], async (data) => {
+            chrome.storage.local.get(['clerk_user', 'clerk_token'], async (data) => {
+              if (chrome.runtime.lastError) {
+                Logger.error('[Popup] Storage read error in callback handler:', chrome.runtime.lastError);
+              } else {
+                Logger.info('[Popup] Storage check in callback handler:', {
+                  hasUser: !!data.clerk_user,
+                  hasToken: !!data.clerk_token,
+                  userId: data.clerk_user?.id,
+                  email: data.clerk_user?.email
+                });
+              }
+              
               if (data.clerk_user) {
                 Logger.info('[Popup] ✅ User found in storage:', data.clerk_user.id);
                 // Update UI immediately from storage
@@ -195,7 +305,7 @@
                 }
               } else {
                 // No storage yet, try to reload auth state
-                Logger.info('[Popup] No storage yet, checking auth state...');
+                Logger.warn('[Popup] ⚠️ No storage found after callback - checking auth state...');
                 if (auth) {
                   auth.checkUserSession().then(() => {
                     updateAuthUI();
@@ -214,7 +324,11 @@
           } else if (request.type === 'AUTH_ERROR') {
             // Handle auth errors from background/service worker
             Logger.error('[Popup] Auth error received:', request.error);
-            errorHandler.showError('AUTH_SIGN_UP_FAILED');
+            if (errorHandler) {
+              errorHandler.showError('AUTH_SIGN_UP_FAILED');
+            } else {
+              showFallbackError('Authentication error occurred.');
+            }
           }
         });
       } else {
@@ -251,7 +365,11 @@
       }
     } catch (err) {
       Logger.error('Auth initialization error', err);
-      errorHandler.showError('AUTH_NOT_CONFIGURED');
+      if (errorHandler) {
+        errorHandler.showError('AUTH_NOT_CONFIGURED');
+      } else {
+        showFallbackError('Authentication initialization failed.');
+      }
       // Show diagnostic panel on error
       showDiagnosticPanel();
     }
@@ -443,26 +561,39 @@
 
   /**
    * Set up event listeners with proper cleanup tracking
+   * CRITICAL: This must be called early and must not fail
    */
   function setupEventListeners() {
+    console.log('[Popup] Setting up event listeners...');
+    
     // Analyze button
     const analyzeBtn = document.getElementById('analyzeBtn');
     if (analyzeBtn) {
+      console.log('[Popup] Found analyzeBtn, attaching listener');
       const clickHandler = async () => {
         try {
           await triggerAnalysis();
         } catch (err) {
-          Logger.error('Failed to trigger analysis', err);
+          console.error('Failed to trigger analysis', err);
+          if (errorHandler) {
+            errorHandler.showError('ANALYSIS_FAILED');
+          } else {
+            showFallbackError('Analysis failed. Please try again.');
+          }
         }
       };
       
       analyzeBtn.addEventListener('click', clickHandler);
       eventListeners.push({ element: analyzeBtn, event: 'click', handler: clickHandler });
+      console.log('[Popup] Analyze button listener attached');
+    } else {
+      console.error('[Popup] ERROR: analyzeBtn not found in DOM!');
     }
 
     // Settings link in footer
     const settingsLink = document.getElementById('settingsLink');
     if (settingsLink) {
+      console.log('[Popup] Found settingsLink, attaching listener');
       const clickHandler = async () => {
         try {
           await chrome.runtime.openOptionsPage();
@@ -475,12 +606,16 @@
 
       settingsLink.addEventListener('click', clickHandler);
       eventListeners.push({ element: settingsLink, event: 'click', handler: clickHandler });
+      console.log('[Popup] Settings link listener attached');
+    } else {
+      console.warn('[Popup] settingsLink not found in DOM');
     }
 
 
     // Refresh subscription button
     const refreshSubscriptionBtn = document.getElementById('refreshSubscriptionBtn');
     if (refreshSubscriptionBtn) {
+      console.log('[Popup] Found refreshSubscriptionBtn, attaching listener');
       const clickHandler = async () => {
         try {
           refreshSubscriptionBtn.textContent = '⏳ Refreshing...';
@@ -495,7 +630,11 @@
           showSuccess('✅ Subscription status refreshed');
         } catch (err) {
           Logger.error('Failed to refresh subscription', err);
-          errorHandler.showError('CONNECTION_FAILED');
+          if (errorHandler) {
+            errorHandler.showError('CONNECTION_FAILED');
+          } else {
+            showFallbackError('Failed to refresh subscription. Please try again.');
+          }
         } finally {
           refreshSubscriptionBtn.textContent = '🔄 Refresh Status';
           refreshSubscriptionBtn.disabled = false;
@@ -525,7 +664,11 @@
           window.close();
         } catch (err) {
           Logger.error('Failed to open upgrade page', err);
-          errorHandler.showError('NETWORK_ERROR');
+          if (errorHandler) {
+            errorHandler.showError('NETWORK_ERROR');
+          } else {
+            showFallbackError('Failed to open upgrade page. Please check your connection.');
+          }
         }
       };
 
@@ -536,6 +679,7 @@
     // Sign In button
     const signInBtn = document.getElementById('signInBtn');
     if (signInBtn) {
+      console.log('[Popup] Found signInBtn, attaching listener');
       const clickHandler = async () => {
         try {
           if (auth) {
@@ -543,21 +687,33 @@
             // Close popup after redirecting to auth
             window.close();
           } else {
-            errorHandler.showError('AUTH_NOT_CONFIGURED');
+            if (errorHandler) {
+              errorHandler.showError('AUTH_NOT_CONFIGURED');
+            } else {
+              showFallbackError('Authentication not configured. Please check settings.');
+            }
           }
         } catch (err) {
-          Logger.error('Failed to sign in', err);
-          errorHandler.showError('AUTH_SIGN_IN_FAILED');
+          console.error('Failed to sign in', err);
+          if (errorHandler) {
+            errorHandler.showError('AUTH_SIGN_IN_FAILED');
+          } else {
+            showFallbackError('Sign in failed. Please try again.');
+          }
         }
       };
 
       signInBtn.addEventListener('click', clickHandler);
       eventListeners.push({ element: signInBtn, event: 'click', handler: clickHandler });
+      console.log('[Popup] Sign In button listener attached');
+    } else {
+      console.error('[Popup] ERROR: signInBtn not found in DOM!');
     }
 
     // Sign Up button
     const signUpBtn = document.getElementById('signUpBtn');
     if (signUpBtn) {
+      console.log('[Popup] Found signUpBtn, attaching listener');
       const clickHandler = async () => {
         Logger.info('[Popup] Sign Up button clicked');
         Logger.info('[Popup] Auth object exists:', !!auth);
@@ -568,19 +724,27 @@
             Logger.warn('[Popup] Auth not initialized yet, waiting...');
             await new Promise(resolve => setTimeout(resolve, 500));
             if (!auth) {
-              Logger.error('[Popup] Auth object still null after wait');
-              errorHandler.showError('AUTH_NOT_CONFIGURED');
+              console.error('[Popup] Auth object still null after wait');
+              if (errorHandler) {
+                errorHandler.showError('AUTH_NOT_CONFIGURED');
+              } else {
+                showFallbackError('Authentication not configured. Please check settings.');
+              }
               return;
             }
           }
 
           // Double-check auth is initialized
           if (!auth.isInitialized) {
-            Logger.warn('[Popup] Auth not initialized, attempting to initialize...');
+            console.warn('[Popup] Auth not initialized, attempting to initialize...');
             const initialized = await auth.initialize();
             if (!initialized) {
-              Logger.error('[Popup] Failed to initialize auth');
-              errorHandler.showError('AUTH_NOT_CONFIGURED');
+              console.error('[Popup] Failed to initialize auth');
+              if (errorHandler) {
+                errorHandler.showError('AUTH_NOT_CONFIGURED');
+              } else {
+                showFallbackError('Authentication not configured. Please check settings.');
+              }
               return;
             }
           }
@@ -609,12 +773,19 @@
           });
           console.error('[Popup] Full error object:', err);
           console.error('[Popup] Error details:', JSON.stringify(err, Object.getOwnPropertyNames(err)));
-          errorHandler.showError('AUTH_SIGN_UP_FAILED');
+          if (errorHandler) {
+            errorHandler.showError('AUTH_SIGN_UP_FAILED');
+          } else {
+            showFallbackError('Sign up failed. Please try again.');
+          }
         }
       };
 
       signUpBtn.addEventListener('click', clickHandler);
       eventListeners.push({ element: signUpBtn, event: 'click', handler: clickHandler });
+      console.log('[Popup] Sign Up button listener attached');
+    } else {
+      console.error('[Popup] ERROR: signUpBtn not found in DOM!');
     }
 
     // Periodically check for authentication when not authenticated
@@ -651,16 +822,27 @@
             await updateAuthUI();
             showSuccess('✅ Signed out successfully');
           } else {
-            errorHandler.showError('AUTH_NOT_CONFIGURED');
+            if (errorHandler) {
+              errorHandler.showError('AUTH_NOT_CONFIGURED');
+            } else {
+              showFallbackError('Authentication not configured.');
+            }
           }
         } catch (err) {
-          Logger.error('Failed to sign out', err);
-          errorHandler.showError('AUTH_SIGN_IN_FAILED'); // Using same error type since it's auth-related
+          console.error('Failed to sign out', err);
+          if (errorHandler) {
+            errorHandler.showError('AUTH_SIGN_IN_FAILED'); // Using same error type since it's auth-related
+          } else {
+            showFallbackError('Sign out failed. Please try again.');
+          }
         }
       };
 
       signOutBtn.addEventListener('click', clickHandler);
       eventListeners.push({ element: signOutBtn, event: 'click', handler: clickHandler });
+      console.log('[Popup] Sign Out button listener attached');
+    } else {
+      console.warn('[Popup] signOutBtn not found in DOM (may be hidden)');
     }
 
     // Sync Auth button - manually sync after signing in on Clerk's page
@@ -804,13 +986,21 @@
               } else {
                 syncAuthBtn.textContent = '🔄 Sync Auth';
                 syncAuthBtn.disabled = false;
-                errorHandler.showError('AUTH_SYNC_FAILED');
+                if (errorHandler) {
+                  errorHandler.showError('AUTH_SYNC_FAILED');
+                } else {
+                  showFallbackError('Failed to sync authentication. Please try again.');
+                }
               }
             }
           }); // Close chrome.tabs.query callback
         } catch (err) {
           Logger.error('Failed to sync auth', err);
-          errorHandler.showError('AUTH_SYNC_FAILED');
+          if (errorHandler) {
+            errorHandler.showError('AUTH_SYNC_FAILED');
+          } else {
+            showFallbackError('Failed to sync authentication. Please try again.');
+          }
           syncAuthBtn.textContent = '🔄 Sync Auth';
           syncAuthBtn.disabled = false;
         }
@@ -818,6 +1008,9 @@
 
       syncAuthBtn.addEventListener('click', clickHandler);
       eventListeners.push({ element: syncAuthBtn, event: 'click', handler: clickHandler });
+      console.log('[Popup] Sync Auth button listener attached');
+    } else {
+      console.warn('[Popup] syncAuthBtn not found in DOM (may be hidden)');
     }
 
     // Refresh Auth button - manually check for auth state changes
@@ -847,7 +1040,11 @@
           }
         } catch (err) {
           Logger.error('[Popup] Failed to refresh auth', err);
-          errorHandler.showError('AUTH_REFRESH_FAILED');
+          if (errorHandler) {
+            errorHandler.showError('AUTH_REFRESH_FAILED');
+          } else {
+            showFallbackError('Failed to refresh authentication. Please try again.');
+          }
           refreshAuthBtn.textContent = '🔄 Refresh Auth';
           refreshAuthBtn.disabled = false;
         }
@@ -855,6 +1052,9 @@
       
       refreshAuthBtn.addEventListener('click', clickHandler);
       eventListeners.push({ element: refreshAuthBtn, event: 'click', handler: clickHandler });
+      console.log('[Popup] Refresh Auth button listener attached');
+    } else {
+      console.warn('[Popup] refreshAuthBtn not found in DOM (may be hidden)');
     }
 
     // Diagnostic panel buttons
@@ -866,6 +1066,9 @@
       };
       showDiagnosticBtn.addEventListener('click', clickHandler);
       eventListeners.push({ element: showDiagnosticBtn, event: 'click', handler: clickHandler });
+      console.log('[Popup] Show Diagnostic button listener attached');
+    } else {
+      console.warn('[Popup] showDiagnosticBtn not found in DOM');
     }
 
     const closeDiagnosticBtn = document.getElementById('closeDiagnostic');
@@ -879,8 +1082,14 @@
 
     const refreshDiagnosticBtn = document.getElementById('refreshDiagnostic');
     if (refreshDiagnosticBtn) {
-      const clickHandler = () => {
-        runDiagnostics();
+      const clickHandler = async () => {
+        console.log('[Popup] Refresh diagnostic button clicked');
+        try {
+          await runDiagnostics();
+          console.log('[Popup] Diagnostics refresh completed');
+        } catch (err) {
+          console.error('[Popup] Error refreshing diagnostics:', err);
+        }
       };
       refreshDiagnosticBtn.addEventListener('click', clickHandler);
       eventListeners.push({ element: refreshDiagnosticBtn, event: 'click', handler: clickHandler });
@@ -898,7 +1107,12 @@
       };
       openSettingsFromDiagnosticBtn.addEventListener('click', clickHandler);
       eventListeners.push({ element: openSettingsFromDiagnosticBtn, event: 'click', handler: clickHandler });
+      console.log('[Popup] Open Settings From Diagnostic button listener attached');
+    } else {
+      console.warn('[Popup] openSettingsFromDiagnosticBtn not found in DOM');
     }
+    
+    console.log(`[Popup] Event listeners setup complete. Total listeners: ${eventListeners.length}`);
   }
 
   /**
@@ -1088,18 +1302,30 @@
   async function triggerAnalysis() {
     // Check authentication first
     if (!auth || !auth.isAuthenticated()) {
-      errorHandler.showError('AUTH_REQUIRED');
+      if (errorHandler) {
+        errorHandler.showError('AUTH_REQUIRED');
+      } else {
+        showFallbackError('Please sign in to use analysis features.');
+      }
       // Prompt sign in
       try {
         if (auth) {
           await auth.signIn();
           window.close();
         } else {
-          errorHandler.showError('AUTH_NOT_CONFIGURED');
+          if (errorHandler) {
+            errorHandler.showError('AUTH_NOT_CONFIGURED');
+          } else {
+            showFallbackError('Authentication not configured. Please check settings.');
+          }
         }
       } catch (err) {
-        Logger.error('Failed to sign in', err);
-        errorHandler.showError('AUTH_SIGN_IN_FAILED');
+        console.error('Failed to sign in', err);
+        if (errorHandler) {
+          errorHandler.showError('AUTH_SIGN_IN_FAILED');
+        } else {
+          showFallbackError('Sign in failed. Please try again.');
+        }
       }
       return;
     }
@@ -1126,11 +1352,19 @@
         showSuccess('✅ Analysis complete!');
         Logger.info('Analysis completed successfully');
       } else {
-        errorHandler.showError('ANALYSIS_NO_SELECTION');
+        if (errorHandler) {
+          errorHandler.showError('ANALYSIS_NO_SELECTION');
+        } else {
+          showFallbackError('Please select some text on the page to analyze.');
+        }
       }
     } catch (err) {
-      Logger.error('Failed to trigger analysis', err);
-      errorHandler.showErrorFromException(err);
+      console.error('Failed to trigger analysis', err);
+      if (errorHandler) {
+        errorHandler.showErrorFromException(err);
+      } else {
+        showFallbackError('Analysis failed: ' + (err.message || 'Unknown error'));
+      }
     } finally {
       if (analyzeBtn) {
         analyzeBtn.textContent = originalText;
@@ -1316,16 +1550,23 @@
    * Run comprehensive diagnostics
    */
   async function runDiagnostics() {
+    console.log('[Diagnostics] runDiagnostics() called');
     const backendStatusEl = document.getElementById('backendStatus');
     const clerkKeyStatusEl = document.getElementById('clerkKeyStatus');
     const authStateStatusEl = document.getElementById('authStateStatus');
 
     if (!backendStatusEl || !clerkKeyStatusEl || !authStateStatusEl) {
+      console.error('[Diagnostics] Diagnostic elements not found:', {
+        backendStatusEl: !!backendStatusEl,
+        clerkKeyStatusEl: !!clerkKeyStatusEl,
+        authStateStatusEl: !!authStateStatusEl
+      });
       Logger.error('Diagnostic elements not found');
       return;
     }
 
     Logger.info('[Diagnostics] Starting diagnostic checks...');
+    console.log('[Diagnostics] All elements found, starting checks...');
 
     // Check backend connection (with timeout and direct fallback)
     backendStatusEl.textContent = 'Checking...';
@@ -1468,41 +1709,52 @@
     // Check auth state (synchronous - should be fast)
     authStateStatusEl.textContent = 'Checking...';
     authStateStatusEl.className = 'diagnostic-value';
+    console.log('[Diagnostics] Starting auth state check...');
     
-    // Use setTimeout to ensure UI updates immediately  
-    setTimeout(async () => {
-      try {
-        Logger.info('[Diagnostics] Checking auth state...');
-        const localData = await new Promise((resolve) => {
-          chrome.storage.local.get(['clerk_user', 'clerk_token'], (data) => {
-            resolve(data || {});
-          });
+    // Remove setTimeout and run directly
+    try {
+      Logger.info('[Diagnostics] Checking auth state...');
+      const localData = await new Promise((resolve) => {
+        chrome.storage.local.get(['clerk_user', 'clerk_token'], (data) => {
+          resolve(data || {});
         });
+      });
 
-        Logger.info('[Diagnostics] Auth data:', { 
-          hasUser: !!localData.clerk_user,
-          hasToken: !!localData.clerk_token 
-        });
+      Logger.info('[Diagnostics] Auth data:', { 
+        hasUser: !!localData.clerk_user,
+        hasToken: !!localData.clerk_token 
+      });
+      console.log('[Diagnostics] Auth data from storage:', {
+        hasUser: !!localData.clerk_user,
+        hasToken: !!localData.clerk_token,
+        userId: localData.clerk_user?.id,
+        email: localData.clerk_user?.email,
+        authObjectExists: !!auth,
+        authIsAuthenticated: auth?.isAuthenticated?.()
+      });
 
-        if (localData.clerk_user) {
-          const email = localData.clerk_user.email || 'User';
-          authStateStatusEl.textContent = `✅ Signed in (${email.substring(0, 20)}...)`;
-          authStateStatusEl.className = 'diagnostic-value status-ok';
-        } else if (auth && auth.isAuthenticated()) {
-          const user = auth.getCurrentUser();
-          const email = user?.email || user?.primaryEmailAddress?.emailAddress || 'User';
-          authStateStatusEl.textContent = `✅ Signed in (${email.substring(0, 20)}...)`;
-          authStateStatusEl.className = 'diagnostic-value status-ok';
-        } else {
-          authStateStatusEl.textContent = '⚠️ Not signed in';
-          authStateStatusEl.className = 'diagnostic-value status-warning';
-        }
-      } catch (err) {
-        authStateStatusEl.textContent = '❌ Error';
-        authStateStatusEl.className = 'diagnostic-value status-error';
-        Logger.error('[Diagnostics] Auth state check failed', err);
+      if (localData.clerk_user) {
+        const email = localData.clerk_user.email || 'User';
+        authStateStatusEl.textContent = `✅ Signed in (${email.substring(0, 20)}...)`;
+        authStateStatusEl.className = 'diagnostic-value status-ok';
+        console.log('[Diagnostics] ✅ Auth state updated: Signed in');
+      } else if (auth && auth.isAuthenticated()) {
+        const user = auth.getCurrentUser();
+        const email = user?.email || user?.primaryEmailAddress?.emailAddress || 'User';
+        authStateStatusEl.textContent = `✅ Signed in (${email.substring(0, 20)}...)`;
+        authStateStatusEl.className = 'diagnostic-value status-ok';
+        console.log('[Diagnostics] ✅ Auth state updated: Signed in (from auth object)');
+      } else {
+        authStateStatusEl.textContent = '⚠️ Not signed in';
+        authStateStatusEl.className = 'diagnostic-value status-warning';
+        console.log('[Diagnostics] ⚠️ Auth state updated: Not signed in');
       }
-    }, 0);
+    } catch (err) {
+      authStateStatusEl.textContent = '❌ Error';
+      authStateStatusEl.className = 'diagnostic-value status-error';
+      Logger.error('[Diagnostics] Auth state check failed', err);
+      console.error('[Diagnostics] ❌ Auth state check error:', err);
+    }
 
     Logger.info('[Diagnostics] Diagnostic checks completed');
   }

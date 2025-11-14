@@ -383,7 +383,13 @@ try {
 
         case "AUTH_CALLBACK_SUCCESS":
           // Handle successful authentication callback
-          Logger.info("[BG] Authentication callback successful");
+          Logger.info("[BG] 🔔 AUTH_CALLBACK_SUCCESS message received", {
+            hasUser: !!request.user,
+            hasToken: !!request.token,
+            userId: request.user?.id,
+            email: request.user?.email
+          });
+          
           // Store user data if provided
           if (request.user) {
             const dataToStore = {
@@ -399,7 +405,36 @@ try {
             if (request.token) {
               dataToStore.clerk_token = request.token;
             }
-            chrome.storage.local.set(dataToStore);
+            
+            Logger.info("[BG] Storing user data in service worker:", {
+              userId: dataToStore.clerk_user.id,
+              email: dataToStore.clerk_user.email,
+              hasToken: !!dataToStore.clerk_token
+            });
+            
+            chrome.storage.local.set(dataToStore, () => {
+              if (chrome.runtime.lastError) {
+                Logger.error("[BG] ❌ Failed to store user data in service worker:", chrome.runtime.lastError);
+              } else {
+                Logger.info("[BG] ✅ User data stored successfully in service worker");
+                
+                // Verify the storage write
+                chrome.storage.local.get(['clerk_user', 'clerk_token'], (verifyData) => {
+                  if (chrome.runtime.lastError) {
+                    Logger.error("[BG] ❌ Storage verification failed:", chrome.runtime.lastError);
+                  } else {
+                    Logger.info("[BG] ✅ Storage verification:", {
+                      hasUser: !!verifyData.clerk_user,
+                      userId: verifyData.clerk_user?.id,
+                      hasToken: !!verifyData.clerk_token,
+                      matches: verifyData.clerk_user?.id === dataToStore.clerk_user.id
+                    });
+                  }
+                });
+              }
+            });
+          } else {
+            Logger.warn("[BG] ⚠️ AUTH_CALLBACK_SUCCESS received but no user data provided");
           }
           sendResponse({ success: true });
           return true;
