@@ -421,6 +421,9 @@
                       window.location.hostname.includes('accounts.clerk.com') ||
                       window.location.hostname.includes('accounts.clerk.dev');
   
+  // Shared flag to prevent duplicate detection - must be at top level
+  let userDetected = false;
+  
   // ALWAYS log to verify content script is running
   console.log('[CS] Content script loaded', {
     hostname: window.location.hostname,
@@ -527,11 +530,68 @@
                 }
               } catch (immediateErr) {
                 Logger.error('[CS] Immediate extraction failed:', immediateErr);
-                Logger.debug('[CS] Will try in main flow');
+                Logger.debug('[CS] Will try page content extraction');
               }
             })();
-          } else {
-            Logger.warn('[CS] Clerk SDK not yet available, will check in main flow');
+          }
+          
+          // Fallback: Extract user info from page content when SDK not accessible
+          // This handles CSP restrictions or SDK loading issues
+          if (!userDetected) {
+            Logger.info('[CS] Clerk SDK not accessible, extracting user info from page content');
+            
+            // Extract user name from "Welcome, {Name}" pattern
+            const welcomeMatch = pageText.match(/Welcome,?\s+([A-Z][a-zA-Z\s]+)/i);
+            const extractedName = welcomeMatch ? welcomeMatch[1].trim() : null;
+            
+            // Extract email from page if available
+            const emailMatch = pageText.match(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/);
+            
+            // Split name into first/last if possible
+            let firstName = null;
+            let lastName = null;
+            if (extractedName) {
+              const nameParts = extractedName.split(/\s+/);
+              firstName = nameParts[0] || null;
+              lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : null;
+            }
+            
+            // Check cookies for additional auth confirmation
+            const hasAuthCookies = checkCookiesForAuth();
+            
+            if (hasAuthCookies || emailMatch || extractedName) {
+              Logger.info('[CS] ✅ Found auth indicators from page/cookies:', {
+                hasName: !!extractedName,
+                name: extractedName,
+                hasEmail: !!emailMatch,
+                hasCookies: hasAuthCookies
+              });
+              
+              chrome.runtime.sendMessage({
+                type: 'CLERK_AUTH_DETECTED',
+                user: {
+                  id: 'signed-in-user-' + Date.now(), // Generate unique ID
+                  email: emailMatch ? emailMatch[0] : null,
+                  firstName: firstName,
+                  lastName: lastName,
+                  username: extractedName ? extractedName.toLowerCase().replace(/\s+/g, '') : null,
+                  imageUrl: null
+                },
+                token: null
+              }, (response) => {
+                if (!chrome.runtime.lastError) {
+                  Logger.info('[CS] ✅ Successfully sent page-detected auth to extension:', {
+                    name: extractedName,
+                    email: emailMatch ? emailMatch[0] : null
+                  });
+                  userDetected = true;
+                } else {
+                  Logger.error('[CS] Failed to send page-detected auth:', chrome.runtime.lastError);
+                }
+              });
+            } else {
+              Logger.warn('[CS] Page shows signed in but no user info could be extracted from page content');
+            }
           }
         }
       } catch (e) {
@@ -634,7 +694,6 @@
    * Tries multiple times since Clerk SDK might load asynchronously
    * Also checks cookies as fallback detection method
    */
-  let userDetected = false; // Shared flag to prevent duplicate detection
   
   function checkClerkAuth() {
     let attempts = 0;
