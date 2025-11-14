@@ -191,7 +191,13 @@
       if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged) {
         chrome.storage.onChanged.addListener((changes, areaName) => {
           if (areaName === 'local' && changes.clerk_user) {
-            Logger.info('[Popup] Clerk user storage changed, updating UI');
+            Logger.info('[Popup] 🔔 Clerk user storage changed!', {
+              oldValue: changes.clerk_user.oldValue ? 'had user' : 'no user',
+              newValue: changes.clerk_user.newValue ? 'has user' : 'no user',
+              userId: changes.clerk_user.newValue?.id
+            });
+            console.log('[Popup] 🔔 Storage changed:', changes.clerk_user);
+            
             if (auth) {
               auth.checkUserSession().then(() => {
                 updateAuthUI();
@@ -201,6 +207,10 @@
                   authCheckInterval = null;
                 }
               });
+            } else {
+              // If auth not initialized, update UI directly from storage
+              Logger.info('[Popup] Auth not initialized, updating UI directly from storage');
+              updateAuthUI();
             }
           }
         });

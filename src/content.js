@@ -442,19 +442,88 @@
     // This happens when Clerk can't redirect but user IS signed in
     const checkSignedInPage = () => {
       try {
-        const pageText = document.body.innerText || document.body.textContent || '';
+        // Get page text from multiple sources to handle dynamic content
+        // Try innerText first (excludes script/style), then textContent, then visible text
+        let pageText = '';
+        let hasWelcomeElement = false;
+        let welcomeName = null;
+        
+        if (document.body) {
+          // First, try to find "Welcome" text directly in DOM elements
+          const allElements = document.querySelectorAll('*');
+          for (const el of allElements) {
+            const text = el.textContent || el.innerText || '';
+            if (text.includes('Welcome,') || text.includes('Welcome ')) {
+              // Try to match "Welcome, Name" or "Welcome Name" - capture only the name part
+              // Match stops at first non-letter character or end of word
+              const match = text.match(/Welcome,?\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/i);
+              if (match) {
+                hasWelcomeElement = true;
+                welcomeName = match[1].trim();
+                pageText = text; // Use this element's text
+                Logger.info('[CS] ✅ Found Welcome element with name:', welcomeName);
+                break;
+              }
+              // Fallback: try to extract just first word after Welcome
+              const simpleMatch = text.match(/Welcome,?\s+([A-Z][a-z]+)/i);
+              if (simpleMatch) {
+                hasWelcomeElement = true;
+                welcomeName = simpleMatch[1].trim();
+                pageText = text;
+                Logger.info('[CS] ✅ Found Welcome element with name (simple match):', welcomeName);
+                break;
+              }
+            }
+          }
+          
+          // Log if we found welcome element
+          if (!hasWelcomeElement) {
+            Logger.debug('[CS] No Welcome element found via DOM search, will try pageText regex');
+          }
+          
+          // If we didn't find Welcome in a specific element, try body text
+          if (!hasWelcomeElement) {
+            // Use innerText which excludes CSS and scripts
+            pageText = document.body.innerText || '';
+            // If innerText is empty or only contains CSS, try textContent
+            if (!pageText || pageText.trim().length < 50 || pageText.includes(':root')) {
+              pageText = document.body.textContent || '';
+            }
+            // Also try getting visible text from the main content area
+            const mainContent = document.querySelector('main') || document.querySelector('[role="main"]') || document.body;
+            if (mainContent && mainContent.innerText) {
+              const visibleText = mainContent.innerText;
+              if (visibleText.length > pageText.length && !visibleText.includes(':root')) {
+                pageText = visibleText;
+              }
+            }
+          }
+        }
+        
         const hasSignedInMessage = pageText.includes('You are signed in') || 
                                    pageText.includes('signed in, but Clerk cannot redirect') ||
-                                   pageText.includes('Development mode. You are signed in');
+                                   pageText.includes('Development mode. You are signed in') ||
+                                   pageText.includes('Welcome,') ||
+                                   hasWelcomeElement;
         
         Logger.info('[CS] Checking signed-in page:', {
           hasSignedInMessage,
-          pageTextSnippet: pageText.substring(0, 100),
+          pageTextLength: pageText.length,
+          pageTextSnippet: pageText.substring(0, 200),
           url: window.location.href
         });
-        console.log('[CS] Signed-in check:', { hasSignedInMessage, url: window.location.href });
+        console.log('[CS] Signed-in check:', { 
+          hasSignedInMessage, 
+          pageTextLength: pageText.length,
+          hasWelcome: pageText.includes('Welcome'),
+          url: window.location.href 
+        });
         
-        if (hasSignedInMessage) {
+        // Also check for "Welcome" pattern even if signed-in message not found
+        const hasWelcomePattern = pageText.match(/Welcome,?\s+([A-Z][a-zA-Z\s]+)/i);
+        const shouldProcess = hasSignedInMessage || hasWelcomePattern;
+        
+        if (shouldProcess) {
           Logger.info('[CS] DETECTED: Page shows "signed in" message - user is authenticated but redirect failed');
           
           // Try to get Clerk SDK immediately
@@ -541,8 +610,15 @@
             Logger.info('[CS] Clerk SDK not accessible, extracting user info from page content');
             
             // Extract user name from "Welcome, {Name}" pattern
-            const welcomeMatch = pageText.match(/Welcome,?\s+([A-Z][a-zA-Z\s]+)/i);
-            const extractedName = welcomeMatch ? welcomeMatch[1].trim() : null;
+            // Prefer the name we found via DOM search, otherwise try regex on pageText
+            const extractedName = welcomeName || (pageText.match(/Welcome,?\s+([A-Z][a-zA-Z\s]+)/i)?.[1]?.trim() || null);
+            
+            Logger.info('[CS] Name extraction result:', {
+              welcomeName,
+              extractedName,
+              pageTextSnippet: pageText.substring(0, 300),
+              hasWelcomeInPageText: pageText.includes('Welcome')
+            });
             
             // Extract email from page if available
             const emailMatch = pageText.match(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/);
@@ -556,8 +632,22 @@
               lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : null;
             }
             
-            // Check cookies for additional auth confirmation
-            const hasAuthCookies = checkCookiesForAuth();
+            // Check cookies for additional auth confirmation (if function is available)
+            let hasAuthCookies = false;
+            try {
+              if (typeof checkCookiesForAuth === 'function') {
+                hasAuthCookies = checkCookiesForAuth();
+              }
+            } catch (e) {
+              // Function not available yet, skip cookie check
+            }
+            
+            Logger.info('[CS] Auth indicators check:', {
+              hasAuthCookies,
+              emailMatch: emailMatch ? emailMatch[0] : null,
+              extractedName,
+              willSend: !!(hasAuthCookies || emailMatch || extractedName)
+            });
             
             if (hasAuthCookies || emailMatch || extractedName) {
               Logger.info('[CS] ✅ Found auth indicators from page/cookies:', {
@@ -567,28 +657,74 @@
                 hasCookies: hasAuthCookies
               });
               
-              chrome.runtime.sendMessage({
-                type: 'CLERK_AUTH_DETECTED',
-                user: {
-                  id: 'signed-in-user-' + Date.now(), // Generate unique ID
-                  email: emailMatch ? emailMatch[0] : null,
-                  firstName: firstName,
-                  lastName: lastName,
-                  username: extractedName ? extractedName.toLowerCase().replace(/\s+/g, '') : null,
-                  imageUrl: null
-                },
-                token: null
-              }, (response) => {
-                if (!chrome.runtime.lastError) {
-                  Logger.info('[CS] ✅ Successfully sent page-detected auth to extension:', {
-                    name: extractedName,
-                    email: emailMatch ? emailMatch[0] : null
-                  });
-                  userDetected = true;
-                } else {
-                  Logger.error('[CS] Failed to send page-detected auth:', chrome.runtime.lastError);
-                }
+              const userData = {
+                id: 'signed-in-user-' + Date.now(), // Generate unique ID
+                email: emailMatch ? emailMatch[0] : null,
+                firstName: firstName,
+                lastName: lastName,
+                username: extractedName ? extractedName.toLowerCase().replace(/\s+/g, '') : null,
+                imageUrl: null
+              };
+              
+              Logger.info('[CS] Attempting to send CLERK_AUTH_DETECTED message:', {
+                userId: userData.id,
+                email: userData.email,
+                firstName: userData.firstName,
+                lastName: userData.lastName
               });
+              
+              try {
+                Logger.info('[CS] About to call chrome.runtime.sendMessage');
+                console.log('[CS] Sending message now:', { type: 'CLERK_AUTH_DETECTED', user: userData });
+                
+                // Ensure service worker is active by checking runtime
+                if (!chrome.runtime.id) {
+                  Logger.error('[CS] ❌ Extension runtime not available');
+                  console.error('[CS] Extension runtime not available');
+                  return;
+                }
+                
+                chrome.runtime.sendMessage({
+                  type: 'CLERK_AUTH_DETECTED',
+                  user: userData,
+                  token: null
+                }, (response) => {
+                  // Check if callback was called (might be undefined if service worker didn't respond)
+                  Logger.info('[CS] sendMessage callback executed');
+                  console.log('[CS] Callback executed, lastError:', chrome.runtime.lastError, 'response:', response);
+                  
+                  if (chrome.runtime.lastError) {
+                    Logger.error('[CS] ❌ Failed to send page-detected auth:', chrome.runtime.lastError.message);
+                    console.error('[CS] Runtime error:', chrome.runtime.lastError);
+                  } else {
+                    Logger.info('[CS] ✅ Successfully sent page-detected auth to extension:', {
+                      name: extractedName,
+                      email: emailMatch ? emailMatch[0] : null,
+                      response: response
+                    });
+                    console.log('[CS] ✅ Message sent successfully, response:', response);
+                    userDetected = true;
+                    
+                    // Also verify storage was updated
+                    chrome.storage.local.get(['clerk_user'], (result) => {
+                      if (result.clerk_user) {
+                        Logger.info('[CS] ✅ Verified user stored in extension:', result.clerk_user.id);
+                        console.log('[CS] ✅ User confirmed in storage:', result.clerk_user);
+                      } else {
+                        Logger.warn('[CS] ⚠️ User not found in storage after message send');
+                        console.warn('[CS] User not in storage:', result);
+                      }
+                    });
+                  }
+                });
+                
+                // Also log after the sendMessage call to verify it was called
+                Logger.info('[CS] sendMessage call completed (callback may execute later)');
+                console.log('[CS] sendMessage call completed');
+              } catch (error) {
+                Logger.error('[CS] ❌ Exception sending CLERK_AUTH_DETECTED message:', error);
+                console.error('[CS] Exception:', error);
+              }
             } else {
               Logger.warn('[CS] Page shows signed in but no user info could be extracted from page content');
             }
@@ -599,9 +735,22 @@
       }
     };
     
-    // Check immediately if page is loaded
+    // Check immediately if page is loaded, and retry if page text is empty or contains CSS
     if (document.readyState !== 'loading') {
       checkSignedInPage();
+      // Retry after delays to catch dynamically loaded content
+      setTimeout(() => {
+        const pageText = document.body.innerText || document.body.textContent || '';
+        // Retry if we got CSS content or if page text is now available
+        if (pageText.includes(':root') || (pageText.length > 50 && (pageText.includes('Welcome') || pageText.includes('signed in')))) {
+          Logger.info('[CS] Retrying signed-in check after delay - page content now available');
+          checkSignedInPage();
+        }
+      }, 1000);
+      // Also retry after longer delay for slow-loading content
+      setTimeout(() => {
+        checkSignedInPage();
+      }, 2000);
     }
     
     // Wait for page to load, then check for Clerk session
