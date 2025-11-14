@@ -904,42 +904,22 @@
       console.warn('[Popup] signOutBtn not found in DOM (may be hidden)');
     }
 
-    // Toggle Status button - toggle visibility of status section
+    // Status button - show diagnostic panel
     const toggleStatusBtn = document.getElementById('toggleStatusBtn');
     if (toggleStatusBtn) {
-      const statusSection = document.querySelector('.status-section');
-      const mainContent = document.querySelector('.main-content');
-      
-      // Initialize button text based on current visibility
-      if (statusSection && mainContent) {
-        const computedDisplay = window.getComputedStyle(statusSection).display;
-        const isVisible = computedDisplay !== 'none';
-        toggleStatusBtn.textContent = isVisible ? '🔍 Hide Status' : '🔍 Show Status';
-      }
-      
       const clickHandler = () => {
-        if (statusSection && mainContent) {
-          // Only toggle if main-content is visible
-          if (mainContent.style.display === 'none') {
-            Logger.warn('[Popup] Cannot toggle status section - main content is hidden');
-            return;
-          }
-          
-          // Check if currently visible (accounting for inline styles and computed styles)
-          const currentDisplay = statusSection.style.display;
-          const computedDisplay = window.getComputedStyle(statusSection).display;
-          const isVisible = currentDisplay !== 'none' && computedDisplay !== 'none';
-          
-          // Toggle visibility
-          statusSection.style.display = isVisible ? 'none' : 'block';
-          toggleStatusBtn.textContent = isVisible ? '🔍 Show Status' : '🔍 Hide Status';
-          Logger.info('[Popup] Status section toggled', { visible: !isVisible });
+        try {
+          showDiagnosticPanel();
+          Logger.info('[Popup] Diagnostic panel opened via Status button');
+        } catch (err) {
+          Logger.error('[Popup] Failed to show diagnostic panel', err);
+          showFallbackError('Failed to open diagnostic panel. Please try again.');
         }
       };
       
       toggleStatusBtn.addEventListener('click', clickHandler);
       eventListeners.push({ element: toggleStatusBtn, event: 'click', handler: clickHandler });
-      Logger.info('[Popup] Toggle Status button listener attached');
+      Logger.info('[Popup] Status button listener attached (shows diagnostic panel)');
     } else {
       Logger.warn('[Popup] toggleStatusBtn not found in DOM');
     }
