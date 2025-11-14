@@ -31,7 +31,7 @@
       try {
         initializeErrorHandler();
       } catch (err) {
-        console.error('Error handler initialization failed (non-critical):', err);
+        Logger.error('Error handler initialization failed (non-critical)', err);
         // Continue without error handler - buttons will still work
       }
       
@@ -39,7 +39,7 @@
       try {
         initializeAuth();
       } catch (err) {
-        console.error('Auth initialization failed (non-critical):', err);
+        Logger.error('Auth initialization failed (non-critical)', err);
         // Continue - user can still use buttons
       }
       
@@ -47,7 +47,7 @@
       try {
         initializeOnboarding();
       } catch (err) {
-        console.error('Onboarding initialization failed (non-critical):', err);
+        Logger.error('Onboarding initialization failed (non-critical)', err);
       }
       
       // Load status (defensive)
@@ -56,7 +56,7 @@
         loadGuardServices();
         loadSubscriptionStatus();
       } catch (err) {
-        console.error('Status loading failed (non-critical):', err);
+        Logger.error('Status loading failed (non-critical)', err);
       }
       
       // Check for issues and show diagnostic panel if needed
@@ -64,11 +64,11 @@
         try {
           await checkForIssues();
         } catch (err) {
-          console.error('Issue check failed (non-critical):', err);
+          Logger.error('Issue check failed (non-critical)', err);
         }
       }, 1000);
     } catch (err) {
-      console.error('Popup initialization error:', err);
+      Logger.error('Popup initialization error', err);
       // Even if initialization fails, try to show error
       try {
         Logger.error('Popup init error', err);
@@ -76,7 +76,7 @@
         setTimeout(() => showDiagnosticPanel(), 500);
       } catch (fallbackErr) {
         // Last resort - just log to console
-        console.error('Even fallback error display failed:', fallbackErr);
+        Logger.error('Even fallback error display failed', fallbackErr);
       }
     }
   }
@@ -101,19 +101,19 @@
    */
   function initializeErrorHandler() {
     if (typeof AiGuardianErrorHandler === 'undefined') {
-      console.warn('AiGuardianErrorHandler class not available - error handler not initialized');
+      Logger.warn('AiGuardianErrorHandler class not available - error handler not initialized');
       // Create a minimal fallback error handler
       errorHandler = {
         showError: function(type) {
-          console.error('Error:', type);
+          Logger.error('Error', type);
           showFallbackError('An error occurred: ' + type);
         },
         showErrorFromException: function(err) {
-          console.error('Exception:', err);
+          Logger.error('Exception', err);
           showFallbackError('An error occurred: ' + (err.message || 'Unknown error'));
         },
         showLegacyError: function(message) {
-          console.error('Legacy error:', message);
+          Logger.error('Legacy error', message);
           showFallbackError(message);
         }
       };
@@ -124,19 +124,19 @@
       errorHandler = new AiGuardianErrorHandler();
       Logger.info('Error handler initialized');
     } catch (err) {
-      console.error('Failed to instantiate error handler:', err);
+      Logger.error('Failed to instantiate error handler', err);
       // Create fallback
       errorHandler = {
         showError: function(type) {
-          console.error('Error:', type);
+          Logger.error('Error', type);
           showFallbackError('An error occurred: ' + type);
         },
         showErrorFromException: function(err) {
-          console.error('Exception:', err);
+          Logger.error('Exception', err);
           showFallbackError('An error occurred: ' + (err.message || 'Unknown error'));
         },
         showLegacyError: function(message) {
-          console.error('Legacy error:', message);
+          Logger.error('Legacy error', message);
           showFallbackError(message);
         }
       };
@@ -344,7 +344,7 @@
               newValue: changes.clerk_user.newValue ? 'has user' : 'no user',
               userId: changes.clerk_user.newValue?.id
             });
-            console.log('[Popup] 🔔 Storage changed:', changes.clerk_user);
+            Logger.info('[Popup] Storage changed', { clerk_user: changes.clerk_user });
             
             if (auth) {
               auth.checkUserSession().then(() => {
@@ -457,8 +457,6 @@
 
     const userProfile = document.getElementById('userProfile');
     const authButtons = document.getElementById('authButtons');
-    const syncAuthBtn = document.getElementById('syncAuthBtn');
-    const refreshAuthBtn = document.getElementById('refreshAuthBtn');
     const userAvatar = document.getElementById('userAvatar');
     const userName = document.getElementById('userName');
     const mainContent = document.querySelector('.main-content');
@@ -510,8 +508,6 @@
 
       userProfile.style.display = 'flex';
       authButtons.style.display = 'none';
-      if (syncAuthBtn) syncAuthBtn.style.display = 'none';
-      if (refreshAuthBtn) refreshAuthBtn.style.display = 'none';
       
       // Show main content and analysis section when authenticated
       if (mainContent) {
@@ -525,18 +521,10 @@
       userProfile.style.display = 'none';
       authButtons.style.display = 'flex';
       
-      // Show sync button if user might have signed in on Clerk's page
-      if (syncAuthBtn) {
-        syncAuthBtn.style.display = 'inline-block';
-      }
-      // Show refresh button to manually check for auth
-      if (refreshAuthBtn) {
-        refreshAuthBtn.style.display = 'inline-block';
-      }
-      
-      // Hide main content and analysis section when not authenticated
+      // Show main content (contains status section and guard services - should be visible to all)
+      // Only hide analysis section when not authenticated
       if (mainContent) {
-        mainContent.style.display = 'none';
+        mainContent.style.display = 'block';
       }
       if (analysisSection) {
         analysisSection.style.display = 'none';
@@ -564,17 +552,17 @@
    * CRITICAL: This must be called early and must not fail
    */
   function setupEventListeners() {
-    console.log('[Popup] Setting up event listeners...');
+    Logger.info('[Popup] Setting up event listeners');
     
     // Analyze button
     const analyzeBtn = document.getElementById('analyzeBtn');
     if (analyzeBtn) {
-      console.log('[Popup] Found analyzeBtn, attaching listener');
+      Logger.info('[Popup] Found analyzeBtn, attaching listener');
       const clickHandler = async () => {
         try {
           await triggerAnalysis();
         } catch (err) {
-          console.error('Failed to trigger analysis', err);
+          Logger.error('Failed to trigger analysis', err);
           if (errorHandler) {
             errorHandler.showError('ANALYSIS_FAILED');
           } else {
@@ -845,230 +833,44 @@
       console.warn('[Popup] signOutBtn not found in DOM (may be hidden)');
     }
 
-    // Sync Auth button - manually sync after signing in on Clerk's page
-    const syncAuthBtn = document.getElementById('syncAuthBtn');
-    if (syncAuthBtn) {
-      const clickHandler = async () => {
-        try {
-          syncAuthBtn.textContent = '⏳ Syncing...';
-          syncAuthBtn.disabled = true;
-          
-          if (!auth) {
-            auth = new AiGuardianAuth();
-            await auth.initialize();
+    // Toggle Status button - toggle visibility of status section
+    const toggleStatusBtn = document.getElementById('toggleStatusBtn');
+    if (toggleStatusBtn) {
+      const statusSection = document.querySelector('.status-section');
+      const mainContent = document.querySelector('.main-content');
+      
+      // Initialize button text based on current visibility
+      if (statusSection && mainContent) {
+        const computedDisplay = window.getComputedStyle(statusSection).display;
+        const isVisible = computedDisplay !== 'none';
+        toggleStatusBtn.textContent = isVisible ? '🔍 Hide Status' : '🔍 Show Status';
+      }
+      
+      const clickHandler = () => {
+        if (statusSection && mainContent) {
+          // Only toggle if main-content is visible
+          if (mainContent.style.display === 'none') {
+            Logger.warn('[Popup] Cannot toggle status section - main content is hidden');
+            return;
           }
           
-          // Get Clerk instance URL to open
-          let clerkUrl = null;
-          if (auth && auth.publishableKey) {
-            const keyParts = auth.publishableKey.split('_');
-            const keyType = keyParts.length >= 2 ? keyParts[1] : 'test';
-            let instanceId = '';
-            try {
-              const encodedInstance = keyParts.slice(2).join('_');
-              const decodedInstance = atob(encodedInstance);
-              const instanceMatch = decodedInstance.match(/^([^.]+)/);
-              if (instanceMatch) {
-                instanceId = instanceMatch[1];
-              }
-            } catch (e) {
-              Logger.warn('Could not extract instance ID:', e);
-            }
-            
-            if (instanceId) {
-              clerkUrl = keyType === 'test' 
-                ? `https://${instanceId}.accounts.dev`
-                : `https://${instanceId}.clerk.accounts.dev`;
-            }
-          }
+          // Check if currently visible (accounting for inline styles and computed styles)
+          const currentDisplay = statusSection.style.display;
+          const computedDisplay = window.getComputedStyle(statusSection).display;
+          const isVisible = currentDisplay !== 'none' && computedDisplay !== 'none';
           
-          // First, check if Clerk page is already open
-          chrome.tabs.query({ url: '*://*.accounts.dev/*' }, async (tabs) => {
-            const clerkTabs = tabs.filter(tab => 
-              tab.url && (tab.url.includes('accounts.dev') || tab.url.includes('clerk.accounts.dev'))
-            );
-            
-            if (clerkTabs.length > 0) {
-              // Clerk page already open - send message to force check
-              Logger.info('[Popup] Clerk page already open, sending FORCE_CHECK_AUTH message');
-              for (const tab of clerkTabs) {
-                try {
-                  await chrome.tabs.sendMessage(tab.id, { type: 'FORCE_CHECK_AUTH' });
-                  Logger.info('[Popup] Sent FORCE_CHECK_AUTH to tab:', tab.id);
-                } catch (err) {
-                  Logger.warn('[Popup] Could not send message to tab:', err);
-                }
-              }
-              
-              // Wait for content script to detect - check multiple times
-              let checkCount = 0;
-              const maxChecks = 5;
-              const checkInterval = 1000; // Check every second
-              
-              const checkForAuth = setInterval(async () => {
-                checkCount++;
-                Logger.info(`[Popup] Checking for auth (attempt ${checkCount}/${maxChecks})...`);
-                
-                const localData = await new Promise(resolve => {
-                  chrome.storage.local.get(['clerk_user'], resolve);
-                });
-                
-                if (localData.clerk_user) {
-                  clearInterval(checkForAuth);
-                  await updateAuthUI();
-                  showSuccess('✅ Authentication synced!');
-                  syncAuthBtn.style.display = 'none';
-                  syncAuthBtn.textContent = '🔄 Sync Auth';
-                  syncAuthBtn.disabled = false;
-                } else if (checkCount >= maxChecks) {
-                  clearInterval(checkForAuth);
-                  syncAuthBtn.textContent = '🔄 Sync Auth';
-                  syncAuthBtn.disabled = false;
-                  showSuccess('Not detected. Make sure you\'re signed in on the Clerk page, then try again.');
-                }
-              }, checkInterval);
-            } else if (clerkUrl) {
-              // Open Clerk page - content script will detect auth and send it to extension
-              chrome.tabs.create({ url: clerkUrl }, async (tab) => {
-                // Wait for page to load, then send force check message
-                setTimeout(async () => {
-                  try {
-                    // Send message to trigger auth check
-                    await chrome.tabs.sendMessage(tab.id, { type: 'FORCE_CHECK_AUTH' });
-                    Logger.info('[Popup] Sent FORCE_CHECK_AUTH to new tab');
-                  } catch (err) {
-                    Logger.warn('[Popup] Could not send message to new tab (page may still be loading):', err);
-                  }
-                  
-                  // Wait a moment for content script to detect auth
-                  setTimeout(async () => {
-                    // Check if auth was detected
-                    const localData = await new Promise(resolve => {
-                      chrome.storage.local.get(['clerk_user'], resolve);
-                    });
-                    
-                    if (localData.clerk_user) {
-                      // Auth was synced!
-                      await updateAuthUI();
-                      showSuccess('✅ Authentication synced!');
-                      syncAuthBtn.style.display = 'none';
-                      // Close the tab we opened
-                      chrome.tabs.remove(tab.id);
-                    } else {
-                      // Still not synced - wait a bit more
-                      setTimeout(async () => {
-                        const localData2 = await new Promise(resolve => {
-                          chrome.storage.local.get(['clerk_user'], resolve);
-                        });
-                        
-                        if (localData2.clerk_user) {
-                          await updateAuthUI();
-                          showSuccess('✅ Authentication synced!');
-                          syncAuthBtn.style.display = 'none';
-                          chrome.tabs.remove(tab.id);
-                        } else {
-                          syncAuthBtn.textContent = '🔄 Sync Auth';
-                          syncAuthBtn.disabled = false;
-                          showSuccess('Please sign in on the Clerk page that opened, then click Sync Auth again');
-                        }
-                      }, 3000);
-                    }
-                  }, 2000); // Wait after sending message
-                }, 2000); // Initial wait for page load
-              });
-            } else {
-              // Fallback: try direct sync
-              const synced = await auth.syncAuthFromClerk();
-              if (synced) {
-                await updateAuthUI();
-                showSuccess('✅ Authentication synced!');
-                syncAuthBtn.style.display = 'none';
-              } else {
-                syncAuthBtn.textContent = '🔄 Sync Auth';
-                syncAuthBtn.disabled = false;
-                if (errorHandler) {
-                  errorHandler.showError('AUTH_SYNC_FAILED');
-                } else {
-                  showFallbackError('Failed to sync authentication. Please try again.');
-                }
-              }
-            }
-          }); // Close chrome.tabs.query callback
-        } catch (err) {
-          Logger.error('Failed to sync auth', err);
-          if (errorHandler) {
-            errorHandler.showError('AUTH_SYNC_FAILED');
-          } else {
-            showFallbackError('Failed to sync authentication. Please try again.');
-          }
-          syncAuthBtn.textContent = '🔄 Sync Auth';
-          syncAuthBtn.disabled = false;
-        }
-      };
-
-      syncAuthBtn.addEventListener('click', clickHandler);
-      eventListeners.push({ element: syncAuthBtn, event: 'click', handler: clickHandler });
-      console.log('[Popup] Sync Auth button listener attached');
-    } else {
-      console.warn('[Popup] syncAuthBtn not found in DOM (may be hidden)');
-    }
-
-    // Refresh Auth button - manually check for auth state changes
-    const refreshAuthBtn = document.getElementById('refreshAuthBtn');
-    if (refreshAuthBtn) {
-      const clickHandler = async () => {
-        try {
-          refreshAuthBtn.textContent = '⏳ Refreshing...';
-          refreshAuthBtn.disabled = true;
-          
-          if (!auth) {
-            auth = new AiGuardianAuth();
-            await auth.initialize();
-          }
-          
-          // Check for auth state changes
-          await auth.checkUserSession();
-          await updateAuthUI();
-          
-          if (auth.isAuthenticated()) {
-            showSuccess('✅ Authentication refreshed!');
-            refreshAuthBtn.style.display = 'none';
-          } else {
-            refreshAuthBtn.textContent = '🔄 Refresh Auth';
-            refreshAuthBtn.disabled = false;
-            Logger.info('[Popup] Auth refresh completed, user still not authenticated');
-          }
-        } catch (err) {
-          Logger.error('[Popup] Failed to refresh auth', err);
-          if (errorHandler) {
-            errorHandler.showError('AUTH_REFRESH_FAILED');
-          } else {
-            showFallbackError('Failed to refresh authentication. Please try again.');
-          }
-          refreshAuthBtn.textContent = '🔄 Refresh Auth';
-          refreshAuthBtn.disabled = false;
+          // Toggle visibility
+          statusSection.style.display = isVisible ? 'none' : 'block';
+          toggleStatusBtn.textContent = isVisible ? '🔍 Show Status' : '🔍 Hide Status';
+          Logger.info('[Popup] Status section toggled', { visible: !isVisible });
         }
       };
       
-      refreshAuthBtn.addEventListener('click', clickHandler);
-      eventListeners.push({ element: refreshAuthBtn, event: 'click', handler: clickHandler });
-      console.log('[Popup] Refresh Auth button listener attached');
+      toggleStatusBtn.addEventListener('click', clickHandler);
+      eventListeners.push({ element: toggleStatusBtn, event: 'click', handler: clickHandler });
+      Logger.info('[Popup] Toggle Status button listener attached');
     } else {
-      console.warn('[Popup] refreshAuthBtn not found in DOM (may be hidden)');
-    }
-
-    // Diagnostic panel buttons
-    const showDiagnosticBtn = document.getElementById('showDiagnostic');
-    if (showDiagnosticBtn) {
-      const clickHandler = () => {
-        showDiagnosticPanel();
-        runDiagnostics();
-      };
-      showDiagnosticBtn.addEventListener('click', clickHandler);
-      eventListeners.push({ element: showDiagnosticBtn, event: 'click', handler: clickHandler });
-      console.log('[Popup] Show Diagnostic button listener attached');
-    } else {
-      console.warn('[Popup] showDiagnosticBtn not found in DOM');
+      Logger.warn('[Popup] toggleStatusBtn not found in DOM');
     }
 
     const closeDiagnosticBtn = document.getElementById('closeDiagnostic');
