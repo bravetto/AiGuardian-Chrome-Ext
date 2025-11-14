@@ -366,9 +366,13 @@ try {
           return true;
 
         case "GET_CLERK_KEY":
-          // Get Clerk publishable key (from storage or hardcoded fallback)
+          // Get Clerk publishable key from storage (must be configured)
           chrome.storage.sync.get(['clerk_publishable_key'], (data) => {
-            const key = data.clerk_publishable_key || "pk_test_ZmFjdHVhbC1oYXJlLTMuY2xlcmsuYWNjb3VudHMuZGV2JA";
+            const key = data.clerk_publishable_key;
+            if (!key) {
+              Logger.warn('[BG] Clerk publishable key not configured');
+              return;
+            }
             sendResponse({ success: true, key: key });
           });
           return true;
@@ -378,16 +382,58 @@ try {
           Logger.info("[BG] Authentication callback successful");
           // Store user data if provided
           if (request.user) {
-            chrome.storage.local.set({
+            const dataToStore = {
               clerk_user: {
                 id: request.user.id,
-                email: request.user.primaryEmailAddress?.emailAddress,
+                email: request.user.primaryEmailAddress?.emailAddress || request.user.email,
                 firstName: request.user.firstName,
                 lastName: request.user.lastName,
                 username: request.user.username,
                 imageUrl: request.user.imageUrl || request.user.profileImageUrl
               }
+            };
+            if (request.token) {
+              dataToStore.clerk_token = request.token;
+            }
+            chrome.storage.local.set(dataToStore);
+          }
+          sendResponse({ success: true });
+          return true;
+
+        case "CLERK_AUTH_DETECTED":
+          // Handle Clerk auth detected from content script on accounts.dev pages
+          Logger.info("[BG] Clerk authentication detected from content script", {
+            hasUser: !!request.user,
+            hasToken: !!request.token,
+            userId: request.user?.id
+          });
+          if (request.user) {
+            // Store user even if token is not available (token fetch might fail)
+            const storageData = {
+              clerk_user: request.user
+            };
+            if (request.token) {
+              storageData.clerk_token = request.token;
+            }
+            chrome.storage.local.set(storageData, () => {
+              Logger.info("[BG] Successfully stored Clerk auth from content script", {
+                hasUser: !!request.user,
+                hasToken: !!request.token,
+                userId: request.user?.id,
+                email: request.user?.email
+              });
+              
+              // Verify storage was successful
+              chrome.storage.local.get(['clerk_user'], (verifyData) => {
+                if (verifyData.clerk_user) {
+                  Logger.info("[BG] Storage verification successful - user stored:", verifyData.clerk_user.id);
+                } else {
+                  Logger.error("[BG] Storage verification FAILED - user not found after set!");
+                }
+              });
             });
+          } else {
+            Logger.warn("[BG] CLERK_AUTH_DETECTED message missing user data");
           }
           sendResponse({ success: true });
           return true;

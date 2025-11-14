@@ -15,21 +15,41 @@
   let eventListeners = [];
   let currentStatus = 'loading';
   let auth = null;
+  let authCheckInterval = null; // For periodic auth checking when not authenticated
   let errorHandler = null;
 
-  try {
-    initializePopup();
-    initializeErrorHandler();
-    setupEventListeners();
-    initializeAuth();
-    initializeOnboarding();
-    loadSystemStatus();
-    loadGuardServices();
-    loadSubscriptionStatus();
-  } catch (err) {
-    Logger.error('Popup init error', err);
-    // Fallback error display if error handler not initialized
-    showFallbackError('Extension failed to load properly. Please refresh and try again.');
+  // Ensure DOM is ready before initializing
+  function initialize() {
+    try {
+      initializePopup();
+      initializeErrorHandler();
+      setupEventListeners(); // Set up button handlers first
+      initializeAuth();
+      initializeOnboarding();
+      loadSystemStatus();
+      loadGuardServices();
+      loadSubscriptionStatus();
+      
+      // Check for issues and show diagnostic panel if needed
+      setTimeout(async () => {
+        await checkForIssues();
+      }, 1000);
+    } catch (err) {
+      Logger.error('Popup init error', err);
+      console.error('Popup initialization error:', err);
+      // Fallback error display if error handler not initialized
+      showFallbackError('Extension failed to load properly. Please refresh and try again.');
+      // Show diagnostic panel on init error
+      setTimeout(() => showDiagnosticPanel(), 500);
+    }
+  }
+
+  // Initialize when DOM is ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initialize);
+  } else {
+    // DOM already ready, initialize immediately
+    initialize();
   }
 
   /**
@@ -83,24 +103,78 @@
    */
   async function initializeAuth() {
     try {
+      // FIRST: Check storage directly for any existing auth (bypasses Clerk initialization)
+      Logger.info('[Popup] Checking storage for existing auth before initializing...');
+      const storageCheck = await new Promise((resolve) => {
+        chrome.storage.local.get(['clerk_user'], (data) => {
+          resolve(data.clerk_user || null);
+        });
+      });
+      
+      if (storageCheck) {
+        Logger.info('[Popup] Found stored user, will update UI after Clerk init');
+      } else {
+        Logger.info('[Popup] No stored user found');
+      }
+      
       auth = new AiGuardianAuth();
       const initialized = await auth.initialize();
 
       if (initialized) {
+        // Force check user session again after initialization
+        Logger.info('[Popup] Clerk initialized, checking user session...');
+        await auth.checkUserSession();
         await updateAuthUI();
       } else {
         Logger.warn('[Popup] Authentication not configured');
         errorHandler.showError('AUTH_NOT_CONFIGURED');
+        // Show diagnostic panel if auth fails
+        showDiagnosticPanel();
+      }
+      
+      // Even if Clerk init failed, check storage directly as fallback
+      if (!initialized || !auth.isAuthenticated()) {
+        Logger.info('[Popup] Clerk not initialized or not authenticated, checking storage directly...');
+        const directStorageCheck = await new Promise((resolve) => {
+          chrome.storage.local.get(['clerk_user'], (data) => {
+            resolve(data.clerk_user || null);
+          });
+        });
+        
+        if (directStorageCheck) {
+          Logger.info('[Popup] Found user in storage but Clerk not initialized - user may have signed in');
+          // Try to initialize auth again with stored user
+          if (!auth || !auth.isInitialized) {
+            Logger.info('[Popup] Re-initializing auth to use stored user...');
+            try {
+              auth = new AiGuardianAuth();
+              await auth.initialize();
+              await auth.checkUserSession();
+              await updateAuthUI();
+            } catch (reinitErr) {
+              Logger.error('[Popup] Failed to re-initialize auth:', reinitErr);
+            }
+          } else {
+            // Force check session
+            await auth.checkUserSession();
+            await updateAuthUI();
+          }
+        }
       }
 
       // Listen for auth callback success and errors
       if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
         chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-          if (request.type === 'AUTH_CALLBACK_SUCCESS') {
-            // Reload auth state when callback succeeds
+          if (request.type === 'AUTH_CALLBACK_SUCCESS' || request.type === 'CLERK_AUTH_DETECTED') {
+            // Reload auth state when callback succeeds or auth is detected
             if (auth) {
               auth.checkUserSession().then(() => {
                 updateAuthUI();
+                // Stop periodic checking if we're now authenticated
+                if (authCheckInterval) {
+                  clearInterval(authCheckInterval);
+                  authCheckInterval = null;
+                }
               });
             }
           } else if (request.type === 'AUTH_ERROR') {
@@ -112,9 +186,30 @@
       } else {
         Logger.warn('[Popup] Chrome runtime API not available - message listener not registered');
       }
+
+      // Listen for storage changes (e.g., when auth is detected by content script)
+      if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged) {
+        chrome.storage.onChanged.addListener((changes, areaName) => {
+          if (areaName === 'local' && changes.clerk_user) {
+            Logger.info('[Popup] Clerk user storage changed, updating UI');
+            if (auth) {
+              auth.checkUserSession().then(() => {
+                updateAuthUI();
+                // Stop periodic checking if we're now authenticated
+                if (authCheckInterval) {
+                  clearInterval(authCheckInterval);
+                  authCheckInterval = null;
+                }
+              });
+            }
+          }
+        });
+      }
     } catch (err) {
       Logger.error('Auth initialization error', err);
       errorHandler.showError('AUTH_NOT_CONFIGURED');
+      // Show diagnostic panel on error
+      showDiagnosticPanel();
     }
   }
 
@@ -160,20 +255,82 @@
    * Update authentication UI based on user state
    */
   async function updateAuthUI() {
-    if (!auth) return;
+    Logger.info('[Popup] updateAuthUI() called');
+    
+    // ALWAYS check storage first, regardless of auth object state
+    Logger.info('[Popup] Checking storage for user...');
+    const storedUser = await new Promise((resolve) => {
+      chrome.storage.local.get(['clerk_user'], (data) => {
+        resolve(data.clerk_user || null);
+      });
+    });
+    
+    const hasStoredUser = !!storedUser;
+    Logger.info('[Popup] Storage check result:', { 
+      hasStoredUser, 
+      userId: storedUser?.id,
+      email: storedUser?.email,
+      authExists: !!auth,
+      authInitialized: auth?.isInitialized,
+      authUser: auth?.user ? auth.user.id : null
+    });
+    
+    // If we have stored user but auth object doesn't have it, update auth object
+    if (hasStoredUser && auth && (!auth.user || auth.user.id !== storedUser.id)) {
+      Logger.info('[Popup] Stored user found but auth object missing it - updating auth object');
+      try {
+        if (!auth.isInitialized) {
+          await auth.initialize();
+        }
+        await auth.checkUserSession();
+      } catch (e) {
+        Logger.warn('[Popup] Failed to sync stored user to auth object:', e);
+      }
+    }
+    
+    if (!auth && !hasStoredUser) {
+      Logger.warn('[Popup] No auth object and no stored user');
+      return;
+    }
 
     const userProfile = document.getElementById('userProfile');
     const authButtons = document.getElementById('authButtons');
+    const syncAuthBtn = document.getElementById('syncAuthBtn');
+    const refreshAuthBtn = document.getElementById('refreshAuthBtn');
     const userAvatar = document.getElementById('userAvatar');
     const userName = document.getElementById('userName');
     const mainContent = document.querySelector('.main-content');
     const analysisSection = document.getElementById('analysisSection');
 
-    if (auth.isAuthenticated()) {
-      // Show user profile
-      const user = auth.getCurrentUser();
-      const avatarUrl = auth.getUserAvatar();
-      const displayName = auth.getUserDisplayName();
+    // Check if authenticated (either via auth object or storage)
+    const isAuth = auth ? auth.isAuthenticated() : hasStoredUser;
+    
+    if (isAuth) {
+      // Get user data - from auth object if available, otherwise from storage
+      let user = null;
+      let avatarUrl = null;
+      let displayName = null;
+      
+      if (auth && auth.isAuthenticated()) {
+        user = auth.getCurrentUser();
+        avatarUrl = auth.getUserAvatar();
+        displayName = auth.getUserDisplayName();
+      } else if (hasStoredUser) {
+        // Get user from storage directly
+        const storedUser = await new Promise((resolve) => {
+          chrome.storage.local.get(['clerk_user'], (data) => {
+            resolve(data.clerk_user || null);
+          });
+        });
+        if (storedUser) {
+          user = storedUser;
+          avatarUrl = storedUser.imageUrl || null;
+          const firstName = storedUser.firstName || '';
+          const lastName = storedUser.lastName || '';
+          const email = storedUser.email || '';
+          displayName = (firstName && lastName) ? `${firstName} ${lastName}` : (firstName || lastName || email || 'User');
+        }
+      }
 
       if (userAvatar) {
         if (avatarUrl) {
@@ -191,6 +348,8 @@
 
       userProfile.style.display = 'flex';
       authButtons.style.display = 'none';
+      if (syncAuthBtn) syncAuthBtn.style.display = 'none';
+      if (refreshAuthBtn) refreshAuthBtn.style.display = 'none';
       
       // Show main content and analysis section when authenticated
       if (mainContent) {
@@ -203,6 +362,15 @@
       // Show auth buttons
       userProfile.style.display = 'none';
       authButtons.style.display = 'flex';
+      
+      // Show sync button if user might have signed in on Clerk's page
+      if (syncAuthBtn) {
+        syncAuthBtn.style.display = 'inline-block';
+      }
+      // Show refresh button to manually check for auth
+      if (refreshAuthBtn) {
+        refreshAuthBtn.style.display = 'inline-block';
+      }
       
       // Hide main content and analysis section when not authenticated
       if (mainContent) {
@@ -405,6 +573,30 @@
       eventListeners.push({ element: signUpBtn, event: 'click', handler: clickHandler });
     }
 
+    // Periodically check for authentication when not authenticated
+    // This handles cases where user signs in in another tab
+    if (auth && !auth.isAuthenticated()) {
+      authCheckInterval = setInterval(async () => {
+        if (auth) {
+          await auth.checkUserSession();
+          if (auth.isAuthenticated()) {
+            updateAuthUI();
+            if (authCheckInterval) {
+              clearInterval(authCheckInterval);
+              authCheckInterval = null;
+            }
+          }
+        }
+      }, 2000); // Check every 2 seconds
+    }
+    
+    // Clean up interval when popup closes
+    window.addEventListener('beforeunload', () => {
+      if (authCheckInterval) {
+        clearInterval(authCheckInterval);
+      }
+    });
+
     // Sign Out button
     const signOutBtn = document.getElementById('signOutBtn');
     if (signOutBtn) {
@@ -425,6 +617,243 @@
 
       signOutBtn.addEventListener('click', clickHandler);
       eventListeners.push({ element: signOutBtn, event: 'click', handler: clickHandler });
+    }
+
+    // Sync Auth button - manually sync after signing in on Clerk's page
+    const syncAuthBtn = document.getElementById('syncAuthBtn');
+    if (syncAuthBtn) {
+      const clickHandler = async () => {
+        try {
+          syncAuthBtn.textContent = '⏳ Syncing...';
+          syncAuthBtn.disabled = true;
+          
+          if (!auth) {
+            auth = new AiGuardianAuth();
+            await auth.initialize();
+          }
+          
+          // Get Clerk instance URL to open
+          let clerkUrl = null;
+          if (auth && auth.publishableKey) {
+            const keyParts = auth.publishableKey.split('_');
+            const keyType = keyParts.length >= 2 ? keyParts[1] : 'test';
+            let instanceId = '';
+            try {
+              const encodedInstance = keyParts.slice(2).join('_');
+              const decodedInstance = atob(encodedInstance);
+              const instanceMatch = decodedInstance.match(/^([^.]+)/);
+              if (instanceMatch) {
+                instanceId = instanceMatch[1];
+              }
+            } catch (e) {
+              Logger.warn('Could not extract instance ID:', e);
+            }
+            
+            if (instanceId) {
+              clerkUrl = keyType === 'test' 
+                ? `https://${instanceId}.accounts.dev`
+                : `https://${instanceId}.clerk.accounts.dev`;
+            }
+          }
+          
+          // First, check if Clerk page is already open
+          chrome.tabs.query({ url: '*://*.accounts.dev/*' }, async (tabs) => {
+            const clerkTabs = tabs.filter(tab => 
+              tab.url && (tab.url.includes('accounts.dev') || tab.url.includes('clerk.accounts.dev'))
+            );
+            
+            if (clerkTabs.length > 0) {
+              // Clerk page already open - send message to force check
+              Logger.info('[Popup] Clerk page already open, sending FORCE_CHECK_AUTH message');
+              for (const tab of clerkTabs) {
+                try {
+                  await chrome.tabs.sendMessage(tab.id, { type: 'FORCE_CHECK_AUTH' });
+                  Logger.info('[Popup] Sent FORCE_CHECK_AUTH to tab:', tab.id);
+                } catch (err) {
+                  Logger.warn('[Popup] Could not send message to tab:', err);
+                }
+              }
+              
+              // Wait for content script to detect - check multiple times
+              let checkCount = 0;
+              const maxChecks = 5;
+              const checkInterval = 1000; // Check every second
+              
+              const checkForAuth = setInterval(async () => {
+                checkCount++;
+                Logger.info(`[Popup] Checking for auth (attempt ${checkCount}/${maxChecks})...`);
+                
+                const localData = await new Promise(resolve => {
+                  chrome.storage.local.get(['clerk_user'], resolve);
+                });
+                
+                if (localData.clerk_user) {
+                  clearInterval(checkForAuth);
+                  await updateAuthUI();
+                  showSuccess('✅ Authentication synced!');
+                  syncAuthBtn.style.display = 'none';
+                  syncAuthBtn.textContent = '🔄 Sync Auth';
+                  syncAuthBtn.disabled = false;
+                } else if (checkCount >= maxChecks) {
+                  clearInterval(checkForAuth);
+                  syncAuthBtn.textContent = '🔄 Sync Auth';
+                  syncAuthBtn.disabled = false;
+                  showSuccess('Not detected. Make sure you\'re signed in on the Clerk page, then try again.');
+                }
+              }, checkInterval);
+            } else if (clerkUrl) {
+              // Open Clerk page - content script will detect auth and send it to extension
+              chrome.tabs.create({ url: clerkUrl }, async (tab) => {
+                // Wait for page to load, then send force check message
+                setTimeout(async () => {
+                  try {
+                    // Send message to trigger auth check
+                    await chrome.tabs.sendMessage(tab.id, { type: 'FORCE_CHECK_AUTH' });
+                    Logger.info('[Popup] Sent FORCE_CHECK_AUTH to new tab');
+                  } catch (err) {
+                    Logger.warn('[Popup] Could not send message to new tab (page may still be loading):', err);
+                  }
+                  
+                  // Wait a moment for content script to detect auth
+                  setTimeout(async () => {
+                    // Check if auth was detected
+                    const localData = await new Promise(resolve => {
+                      chrome.storage.local.get(['clerk_user'], resolve);
+                    });
+                    
+                    if (localData.clerk_user) {
+                      // Auth was synced!
+                      await updateAuthUI();
+                      showSuccess('✅ Authentication synced!');
+                      syncAuthBtn.style.display = 'none';
+                      // Close the tab we opened
+                      chrome.tabs.remove(tab.id);
+                    } else {
+                      // Still not synced - wait a bit more
+                      setTimeout(async () => {
+                        const localData2 = await new Promise(resolve => {
+                          chrome.storage.local.get(['clerk_user'], resolve);
+                        });
+                        
+                        if (localData2.clerk_user) {
+                          await updateAuthUI();
+                          showSuccess('✅ Authentication synced!');
+                          syncAuthBtn.style.display = 'none';
+                          chrome.tabs.remove(tab.id);
+                        } else {
+                          syncAuthBtn.textContent = '🔄 Sync Auth';
+                          syncAuthBtn.disabled = false;
+                          showSuccess('Please sign in on the Clerk page that opened, then click Sync Auth again');
+                        }
+                      }, 3000);
+                    }
+                  }, 2000); // Wait after sending message
+                }, 2000); // Initial wait for page load
+              });
+            } else {
+              // Fallback: try direct sync
+              const synced = await auth.syncAuthFromClerk();
+              if (synced) {
+                await updateAuthUI();
+                showSuccess('✅ Authentication synced!');
+                syncAuthBtn.style.display = 'none';
+              } else {
+                syncAuthBtn.textContent = '🔄 Sync Auth';
+                syncAuthBtn.disabled = false;
+                errorHandler.showError('AUTH_SYNC_FAILED');
+              }
+            }
+          }); // Close chrome.tabs.query callback
+        } catch (err) {
+          Logger.error('Failed to sync auth', err);
+          errorHandler.showError('AUTH_SYNC_FAILED');
+          syncAuthBtn.textContent = '🔄 Sync Auth';
+          syncAuthBtn.disabled = false;
+        }
+      };
+
+      syncAuthBtn.addEventListener('click', clickHandler);
+      eventListeners.push({ element: syncAuthBtn, event: 'click', handler: clickHandler });
+    }
+
+    // Refresh Auth button - manually check for auth state changes
+    const refreshAuthBtn = document.getElementById('refreshAuthBtn');
+    if (refreshAuthBtn) {
+      const clickHandler = async () => {
+        try {
+          refreshAuthBtn.textContent = '⏳ Refreshing...';
+          refreshAuthBtn.disabled = true;
+          
+          if (!auth) {
+            auth = new AiGuardianAuth();
+            await auth.initialize();
+          }
+          
+          // Check for auth state changes
+          await auth.checkUserSession();
+          await updateAuthUI();
+          
+          if (auth.isAuthenticated()) {
+            showSuccess('✅ Authentication refreshed!');
+            refreshAuthBtn.style.display = 'none';
+          } else {
+            refreshAuthBtn.textContent = '🔄 Refresh Auth';
+            refreshAuthBtn.disabled = false;
+            Logger.info('[Popup] Auth refresh completed, user still not authenticated');
+          }
+        } catch (err) {
+          Logger.error('[Popup] Failed to refresh auth', err);
+          errorHandler.showError('AUTH_REFRESH_FAILED');
+          refreshAuthBtn.textContent = '🔄 Refresh Auth';
+          refreshAuthBtn.disabled = false;
+        }
+      };
+      
+      refreshAuthBtn.addEventListener('click', clickHandler);
+      eventListeners.push({ element: refreshAuthBtn, event: 'click', handler: clickHandler });
+    }
+
+    // Diagnostic panel buttons
+    const showDiagnosticBtn = document.getElementById('showDiagnostic');
+    if (showDiagnosticBtn) {
+      const clickHandler = () => {
+        showDiagnosticPanel();
+        runDiagnostics();
+      };
+      showDiagnosticBtn.addEventListener('click', clickHandler);
+      eventListeners.push({ element: showDiagnosticBtn, event: 'click', handler: clickHandler });
+    }
+
+    const closeDiagnosticBtn = document.getElementById('closeDiagnostic');
+    if (closeDiagnosticBtn) {
+      const clickHandler = () => {
+        hideDiagnosticPanel();
+      };
+      closeDiagnosticBtn.addEventListener('click', clickHandler);
+      eventListeners.push({ element: closeDiagnosticBtn, event: 'click', handler: clickHandler });
+    }
+
+    const refreshDiagnosticBtn = document.getElementById('refreshDiagnostic');
+    if (refreshDiagnosticBtn) {
+      const clickHandler = () => {
+        runDiagnostics();
+      };
+      refreshDiagnosticBtn.addEventListener('click', clickHandler);
+      eventListeners.push({ element: refreshDiagnosticBtn, event: 'click', handler: clickHandler });
+    }
+
+    const openSettingsFromDiagnosticBtn = document.getElementById('openSettingsFromDiagnostic');
+    if (openSettingsFromDiagnosticBtn) {
+      const clickHandler = async () => {
+        try {
+          await chrome.runtime.openOptionsPage();
+          window.close();
+        } catch (err) {
+          Logger.error('Failed to open options from diagnostic', err);
+        }
+      };
+      openSettingsFromDiagnosticBtn.addEventListener('click', clickHandler);
+      eventListeners.push({ element: openSettingsFromDiagnosticBtn, event: 'click', handler: clickHandler });
     }
   }
 
@@ -703,13 +1132,29 @@
 
 
   /**
-   * Send message to background script
+   * Send message to background script with timeout
    */
-  function sendMessageToBackground(type, payload = null) {
+  function sendMessageToBackground(type, payload = null, timeout = 10000) {
     return new Promise((resolve) => {
-      chrome.runtime.sendMessage({ type, payload }, (response) => {
-        resolve(response || { success: false, error: 'No response' });
-      });
+      const timeoutId = setTimeout(() => {
+        resolve({ success: false, error: 'Timeout - background script not responding' });
+      }, timeout);
+
+      try {
+        chrome.runtime.sendMessage({ type, payload }, (response) => {
+          clearTimeout(timeoutId);
+          if (chrome.runtime.lastError) {
+            Logger.error('Message to background failed:', chrome.runtime.lastError.message);
+            resolve({ success: false, error: chrome.runtime.lastError.message });
+          } else {
+            resolve(response || { success: false, error: 'No response' });
+          }
+        });
+      } catch (err) {
+        clearTimeout(timeoutId);
+        Logger.error('Failed to send message to background:', err);
+        resolve({ success: false, error: err.message });
+      }
     });
   }
 
@@ -757,6 +1202,265 @@
       element.removeEventListener(event, handler);
     });
     eventListeners = [];
+  }
+
+  /**
+   * Show diagnostic panel
+   */
+  function showDiagnosticPanel() {
+    const panel = document.getElementById('diagnosticPanel');
+    if (panel) {
+      panel.style.display = 'block';
+      runDiagnostics();
+    }
+  }
+
+  /**
+   * Hide diagnostic panel
+   */
+  function hideDiagnosticPanel() {
+    const panel = document.getElementById('diagnosticPanel');
+    if (panel) {
+      panel.style.display = 'none';
+    }
+  }
+
+  /**
+   * Check for issues and auto-show diagnostic panel if problems found
+   */
+  async function checkForIssues() {
+    try {
+      // Check backend connection
+      const backendResponse = await sendMessageToBackground('TEST_GATEWAY_CONNECTION');
+      const backendOk = backendResponse && backendResponse.success;
+
+      // Check Clerk key
+      const syncData = await new Promise(resolve => {
+        chrome.storage.sync.get(['clerk_publishable_key'], resolve);
+      });
+      let clerkKeyOk = !!syncData.clerk_publishable_key;
+      
+      if (!clerkKeyOk) {
+        // Try fetching from backend
+        try {
+          const auth = new AiGuardianAuth();
+          const settings = await auth.getSettings();
+          clerkKeyOk = !!settings.clerk_publishable_key;
+        } catch (e) {
+          // Ignore errors
+        }
+      }
+
+      // Check auth state
+      const localData = await new Promise(resolve => {
+        chrome.storage.local.get(['clerk_user'], resolve);
+      });
+      const authOk = !!localData.clerk_user || (auth && auth.isAuthenticated());
+
+      // Show diagnostic panel if any issues found
+      if (!backendOk || !clerkKeyOk || !authOk) {
+        showDiagnosticPanel();
+      }
+    } catch (err) {
+      Logger.error('Issue check failed', err);
+      // Show diagnostic panel on error
+      showDiagnosticPanel();
+    }
+  }
+
+  /**
+   * Run comprehensive diagnostics
+   */
+  async function runDiagnostics() {
+    const backendStatusEl = document.getElementById('backendStatus');
+    const clerkKeyStatusEl = document.getElementById('clerkKeyStatus');
+    const authStateStatusEl = document.getElementById('authStateStatus');
+
+    if (!backendStatusEl || !clerkKeyStatusEl || !authStateStatusEl) {
+      Logger.error('Diagnostic elements not found');
+      return;
+    }
+
+    Logger.info('[Diagnostics] Starting diagnostic checks...');
+
+    // Check backend connection (with timeout and direct fallback)
+    backendStatusEl.textContent = 'Checking...';
+    backendStatusEl.className = 'diagnostic-value';
+    try {
+      Logger.info('[Diagnostics] Checking backend connection...');
+      
+      // First try via background script
+      let response = null;
+      try {
+        response = await Promise.race([
+          sendMessageToBackground('TEST_GATEWAY_CONNECTION', null, 3000),
+          new Promise((resolve) => setTimeout(() => resolve({ success: false, error: 'Timeout' }), 3000))
+        ]);
+      } catch (bgErr) {
+        Logger.warn('[Diagnostics] Background script check failed, trying direct:', bgErr);
+      }
+      
+      // If background script didn't work, try direct connection test
+      if (!response || !response.success) {
+        Logger.info('[Diagnostics] Trying direct backend connection test...');
+        try {
+          const gatewayUrl = await new Promise(resolve => {
+            chrome.storage.sync.get(['gateway_url'], (data) => {
+              resolve(data.gateway_url || 'https://api.aiguardian.ai');
+            });
+          });
+          
+          const healthUrl = gatewayUrl.replace(/\/$/, '') + '/health/live';
+          const directResponse = await Promise.race([
+            fetch(healthUrl, {
+              method: 'GET',
+              headers: { 'X-Extension-Version': chrome.runtime.getManifest().version }
+            }),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 5000))
+          ]);
+          
+          if (directResponse && directResponse.ok) {
+            response = { success: true };
+          } else {
+            response = { success: false, error: `HTTP ${directResponse.status}` };
+          }
+        } catch (directErr) {
+          Logger.error('[Diagnostics] Direct connection test failed:', directErr);
+          response = { success: false, error: directErr.message || 'Connection failed' };
+        }
+      }
+      
+      Logger.info('[Diagnostics] Backend response:', response);
+      
+      if (response && response.success) {
+        backendStatusEl.textContent = '✅ Connected';
+        backendStatusEl.className = 'diagnostic-value status-ok';
+      } else {
+        const errorMsg = response?.error || 'Unknown error';
+        const displayMsg = errorMsg.includes('Timeout') ? 'Timeout' : 
+                          errorMsg.includes('Failed to fetch') ? 'Network error' :
+                          errorMsg.includes('not responding') ? 'Background error' :
+                          'Disconnected';
+        backendStatusEl.textContent = `❌ ${displayMsg}`;
+        backendStatusEl.className = 'diagnostic-value status-error';
+      }
+    } catch (err) {
+      backendStatusEl.textContent = '❌ Error';
+      backendStatusEl.className = 'diagnostic-value status-error';
+      Logger.error('[Diagnostics] Backend check failed', err);
+    }
+
+    // Check Clerk key - automatically fetch from backend
+    clerkKeyStatusEl.textContent = 'Checking...';
+    clerkKeyStatusEl.className = 'diagnostic-value';
+    
+    // Use setTimeout to ensure UI updates immediately
+    setTimeout(async () => {
+      try {
+        Logger.info('[Diagnostics] Checking Clerk key...');
+        
+        // First check if we already have it in storage
+        const syncData = await new Promise((resolve) => {
+          chrome.storage.sync.get(['clerk_publishable_key', 'clerk_key_source'], (data) => {
+            resolve(data || {});
+          });
+        });
+        
+        Logger.info('[Diagnostics] Clerk key data from storage:', { 
+          hasKey: !!syncData.clerk_publishable_key,
+          source: syncData.clerk_key_source 
+        });
+        
+        if (syncData.clerk_publishable_key) {
+          const source = syncData.clerk_key_source === 'backend_api' ? 'Auto' : 'Manual';
+          clerkKeyStatusEl.textContent = `✅ Configured (${source})`;
+          clerkKeyStatusEl.className = 'diagnostic-value status-ok';
+        } else {
+          // Automatically fetch from backend
+          Logger.info('[Diagnostics] Automatically fetching Clerk key from backend...');
+          try {
+            const auth = new AiGuardianAuth();
+            const settings = await auth.getSettings();
+            
+            Logger.info('[Diagnostics] getSettings() returned:', {
+              hasKey: !!settings.clerk_publishable_key,
+              source: settings.source,
+              error: settings.error,
+              fullSettings: settings
+            });
+            
+            if (settings && settings.clerk_publishable_key) {
+              clerkKeyStatusEl.textContent = '✅ Auto-configured';
+              clerkKeyStatusEl.className = 'diagnostic-value status-ok';
+            } else if (settings && settings.error) {
+              // Show specific error message
+              const errorMsg = typeof settings.error === 'string' 
+                ? settings.error 
+                : (settings.error.error || settings.error.message || 'Unknown error');
+              clerkKeyStatusEl.textContent = `❌ ${errorMsg}`;
+              clerkKeyStatusEl.className = 'diagnostic-value status-error';
+              Logger.warn('[Diagnostics] Backend fetch failed:', settings.error);
+            } else {
+              // No error object, but also no key - show generic message with debug info
+              const debugInfo = settings ? ` (source: ${settings.source || 'unknown'})` : '';
+              clerkKeyStatusEl.textContent = `❌ Not configured${debugInfo}`;
+              clerkKeyStatusEl.className = 'diagnostic-value status-error';
+              Logger.warn('[Diagnostics] No key and no error object:', settings);
+            }
+          } catch (e) {
+            Logger.error('[Diagnostics] Failed to fetch from backend:', e);
+            const errorMsg = e.message || 'Failed to fetch';
+            clerkKeyStatusEl.textContent = `❌ ${errorMsg}`;
+            clerkKeyStatusEl.className = 'diagnostic-value status-error';
+          }
+        }
+      } catch (err) {
+        clerkKeyStatusEl.textContent = '❌ Error';
+        clerkKeyStatusEl.className = 'diagnostic-value status-error';
+        Logger.error('[Diagnostics] Clerk key check failed', err);
+      }
+    }, 0);
+
+    // Check auth state (synchronous - should be fast)
+    authStateStatusEl.textContent = 'Checking...';
+    authStateStatusEl.className = 'diagnostic-value';
+    
+    // Use setTimeout to ensure UI updates immediately  
+    setTimeout(async () => {
+      try {
+        Logger.info('[Diagnostics] Checking auth state...');
+        const localData = await new Promise((resolve) => {
+          chrome.storage.local.get(['clerk_user', 'clerk_token'], (data) => {
+            resolve(data || {});
+          });
+        });
+
+        Logger.info('[Diagnostics] Auth data:', { 
+          hasUser: !!localData.clerk_user,
+          hasToken: !!localData.clerk_token 
+        });
+
+        if (localData.clerk_user) {
+          const email = localData.clerk_user.email || 'User';
+          authStateStatusEl.textContent = `✅ Signed in (${email.substring(0, 20)}...)`;
+          authStateStatusEl.className = 'diagnostic-value status-ok';
+        } else if (auth && auth.isAuthenticated()) {
+          const user = auth.getCurrentUser();
+          const email = user?.email || user?.primaryEmailAddress?.emailAddress || 'User';
+          authStateStatusEl.textContent = `✅ Signed in (${email.substring(0, 20)}...)`;
+          authStateStatusEl.className = 'diagnostic-value status-ok';
+        } else {
+          authStateStatusEl.textContent = '⚠️ Not signed in';
+          authStateStatusEl.className = 'diagnostic-value status-warning';
+        }
+      } catch (err) {
+        authStateStatusEl.textContent = '❌ Error';
+        authStateStatusEl.className = 'diagnostic-value status-error';
+        Logger.error('[Diagnostics] Auth state check failed', err);
+      }
+    }, 0);
+
+    Logger.info('[Diagnostics] Diagnostic checks completed');
   }
 
   // Cleanup on popup close
