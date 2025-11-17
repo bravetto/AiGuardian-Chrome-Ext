@@ -699,7 +699,7 @@
           const gatewayUrl = data.gateway_url || 'https://api.aiguardian.ai';
           const baseUrl = gatewayUrl.replace('/api/v1', '').replace('/api', '');
           // Redirect to landing page where Stripe payment processing occurs
-          const upgradeUrl = `${baseUrl}/subscribe` || 'https://aiguardian.ai/subscribe';
+          const upgradeUrl = `${baseUrl}/subscribe` || 'https://www.aiguardian.ai/subscribe';
 
           chrome.tabs.create({ url: upgradeUrl });
           window.close();
@@ -733,7 +733,7 @@
           // The content script running on that page will detect the Clerk
           // session (via CLERK_AUTH_DETECTED) and sync auth state back to
           // the extension.
-          const landingUrl = 'https://aiguardian.ai';
+          const landingUrl = 'https://www.aiguardian.ai';
 
           if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.create) {
             chrome.tabs.create({ url: landingUrl });
@@ -1072,7 +1072,7 @@
       }
 
       // Open landing page for sign-in; content script will detect Clerk auth
-      const landingUrl = 'https://aiguardian.ai';
+      const landingUrl = 'https://www.aiguardian.ai';
       try {
         if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.create) {
           chrome.tabs.create({ url: landingUrl });

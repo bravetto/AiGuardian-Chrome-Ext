@@ -925,4 +925,8 @@ class AiGuardianGateway {
 }
 
 // Export for use in other modules
-window.AiGuardianGateway = AiGuardianGateway;
+// Works in both service worker (global scope) and window contexts
+if (typeof window !== 'undefined') {
+  window.AiGuardianGateway = AiGuardianGateway;
+}
+// In service worker context, the class is already available globally via importScripts
