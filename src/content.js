@@ -1211,7 +1211,11 @@
         }
         
       case 'ANALYZE_SELECTION':
-        const selection = window.getSelection()?.toString()?.trim() || "";
+        const rawSelection = window.getSelection();
+        const selection = rawSelection?.toString()?.trim() || "";
+        const range = rawSelection && rawSelection.rangeCount > 0
+          ? rawSelection.getRangeAt(0).cloneRange()
+          : null;
 
         if (selection.length < CONFIG.minSelectionLength) {
           sendResponse({
@@ -1239,6 +1243,15 @@
                 error: chrome.runtime.lastError.message
               });
               return;
+            }
+
+            // If analysis succeeded, also show the in-page badge/highlight
+            if (response && response.success) {
+              try {
+                displayAnalysisResults(response, range);
+              } catch (e) {
+                Logger.error('[CS] Failed to display analysis results from popup trigger:', e);
+              }
             }
 
             // Forward response back to popup

@@ -21,6 +21,19 @@
    */
   function initializeOptions() {
     Logger.info('Options page initialized');
+
+    // Apply dev UI flag: in production, hide Clerk + backend config panels
+    try {
+      const isDevUI = typeof SHOW_DEV_UI !== 'undefined' && (SHOW_DEV_UI || window.__AIG_SHOW_DEV_UI === true);
+      if (!isDevUI) {
+        const authSections = document.querySelectorAll('.section[data-dev-ui="auth"], .section[data-dev-ui="backend"]');
+        authSections.forEach((el) => {
+          el.style.display = 'none';
+        });
+      }
+    } catch (e) {
+      Logger.warn('[Options] Failed to apply dev UI flag', e);
+    }
   }
 
   /**
@@ -488,7 +501,7 @@
       tipsBox.style.padding = '8px';
       tipsBox.style.background = 'rgba(0,0,0,0.2)';
       tipsBox.style.borderRadius = '4px';
-      tipsBox.innerText = troubleshootingTips;
+      tipsBox.innerHTML = troubleshootingTips;
 
       resultElement.appendChild(title);
       resultElement.appendChild(messageEl);
