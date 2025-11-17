@@ -1083,7 +1083,10 @@
         Logger.warn('[Popup] Failed to open landing page for sign-in', e);
       }
 
-      window.close();
+      // Delay closing the popup to allow users to read the error message
+      setTimeout(() => {
+        window.close();
+      }, 2000); // 2 second delay
       return;
     }
 
