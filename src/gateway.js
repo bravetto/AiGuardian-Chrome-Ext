@@ -380,25 +380,8 @@ class AiGuardianGateway {
       this.handleError(error, { endpoint, payload });
       throw error;
     }
-    // Sanitize payload data
+    // Sanitize payload data (after validation - sanitization should only make data safer, not invalid)
     payload = this.sanitizeRequestData(payload);
-    
-    try {
-      this.validateRequest(endpoint, payload);
-    } catch (error) {
-      Logger.error('[Gateway] Request validation failed', {
-        context: {
-          file: 'src/gateway.js',
-          endpoint,
-          error: {
-            message: error.message,
-            stack: error.stack
-          }
-        }
-      });
-      this.handleError(error, { endpoint, payload });
-      throw error;
-    }
 
     // Get Clerk session token for authenticated requests (user-based auth only)
     // This is retrieved once and used for both subscription check and API request
