@@ -416,10 +416,14 @@
 
   // Detect Clerk authentication on accounts.dev pages
   // When Clerk redirects to /default-redirect, extract session info
+  // Check if we're on a Clerk account page OR the AiGuardian landing page
+  // The landing page (www.aiguardian.ai) embeds Clerk SDK for authentication
   const isClerkPage = window.location.hostname.includes('accounts.dev') || 
                       window.location.hostname.includes('clerk.accounts.dev') ||
                       window.location.hostname.includes('accounts.clerk.com') ||
-                      window.location.hostname.includes('accounts.clerk.dev');
+                      window.location.hostname.includes('accounts.clerk.dev') ||
+                      window.location.hostname === 'www.aiguardian.ai' ||
+                      window.location.hostname === 'aiguardian.ai';
   
   // Shared flag to prevent duplicate detection - must be at top level
   let userDetected = false;
