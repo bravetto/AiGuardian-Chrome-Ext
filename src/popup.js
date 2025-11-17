@@ -495,8 +495,17 @@
       }
 
       if (userAvatar) {
+        // Clear any existing content
+        while (userAvatar.firstChild) {
+          userAvatar.removeChild(userAvatar.firstChild);
+        }
+
         if (avatarUrl) {
-          userAvatar.innerHTML = `<img src="${avatarUrl}" alt="User Avatar">`;
+          // Create avatar image element safely without using innerHTML
+          const img = document.createElement('img');
+          img.src = avatarUrl;
+          img.alt = 'User Avatar';
+          userAvatar.appendChild(img);
         } else {
           // Show initials as fallback
           const initials = generateUserInitials(displayName);
@@ -551,12 +560,22 @@
   function showAuthNotConfigured() {
     const authSection = document.getElementById('authSection');
     if (authSection) {
-      authSection.innerHTML = `
-        <div style="text-align: center; color: rgba(249, 249, 249, 0.7); font-size: 12px;">
-          Authentication not configured.<br>
-          Add Clerk publishable key in settings.
-        </div>
-      `;
+      // Clear any existing content
+      while (authSection.firstChild) {
+        authSection.removeChild(authSection.firstChild);
+      }
+
+      // Build message safely without using innerHTML
+      const wrapper = document.createElement('div');
+      wrapper.style.textAlign = 'center';
+      wrapper.style.color = 'rgba(249, 249, 249, 0.7)';
+      wrapper.style.fontSize = '12px';
+
+      wrapper.appendChild(document.createTextNode('Authentication not configured.'));
+      wrapper.appendChild(document.createElement('br'));
+      wrapper.appendChild(document.createTextNode('Add Clerk publishable key in settings.'));
+
+      authSection.appendChild(wrapper);
     }
   }
 

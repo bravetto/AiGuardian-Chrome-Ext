@@ -718,7 +718,8 @@ try {
         throw new Error("AiGuardian Gateway not initialized");
       }
 
-      const diagnostics = gateway.getDiagnostics();
+      // getDiagnostics is async; await it to avoid sending a Promise to the UI
+      const diagnostics = await gateway.getDiagnostics();
       sendResponse({ success: true, diagnostics });
     } catch (err) {
       Logger.error("[BG] Failed to get diagnostics:", err);

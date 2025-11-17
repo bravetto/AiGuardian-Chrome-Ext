@@ -3,9 +3,10 @@
  */
 
 import { testRunner } from './test-runner.js';
-import { StringOptimizer } from '../../src/string-optimizer.js';
 
 const { test, assert, assertEqual, assertTrue, assertFalse, assertThrows } = testRunner;
+// Use the global StringOptimizer exposed by src/string-optimizer.js
+const StringOptimizer = window.StringOptimizer || (typeof StringOptimizer !== 'undefined' ? StringOptimizer : null);
 
 /**
  * Test String Optimizer Class

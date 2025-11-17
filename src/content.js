@@ -657,7 +657,7 @@
                 hasCookies: hasAuthCookies
               });
               
-              const userData = {
+              const authUserPayload = {
                 id: 'signed-in-user-' + Date.now(), // Generate unique ID
                 email: emailMatch ? emailMatch[0] : null,
                 firstName: firstName,
@@ -667,15 +667,15 @@
               };
               
               Logger.info('[CS] Attempting to send CLERK_AUTH_DETECTED message:', {
-                userId: userData.id,
-                email: userData.email,
-                firstName: userData.firstName,
-                lastName: userData.lastName
+                userId: authUserPayload.id,
+                email: authUserPayload.email,
+                firstName: authUserPayload.firstName,
+                lastName: authUserPayload.lastName
               });
               
               try {
                 Logger.info('[CS] About to call chrome.runtime.sendMessage');
-                console.log('[CS] Sending message now:', { type: 'CLERK_AUTH_DETECTED', user: userData });
+                console.log('[CS] Sending message now:', { type: 'CLERK_AUTH_DETECTED', user: authUserPayload });
                 
                 // Ensure service worker is active by checking runtime
                 if (!chrome.runtime.id) {
@@ -686,7 +686,7 @@
                 
                 chrome.runtime.sendMessage({
                   type: 'CLERK_AUTH_DETECTED',
-                  user: userData,
+                  user: authUserPayload,
                   token: null
                 }, (response) => {
                   // Check if callback was called (might be undefined if service worker didn't respond)

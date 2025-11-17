@@ -121,8 +121,9 @@ class BackendIntegrationTester {
     const startTime = Date.now();
     
     try {
-      // Test public config endpoint (doesn't require authentication)
-      const response = await this.makeRequest('GET', '/api/v1/config/public', null);
+      // Test public configuration endpoint (doesn't require authentication)
+      // Backend docs: GET /api/v1/config/config
+      const response = await this.makeRequest('GET', '/api/v1/config/config', null);
       const responseTime = Date.now() - startTime;
       
       if (!response.ok) {
@@ -139,6 +140,7 @@ class BackendIntegrationTester {
         publicConfigAccessible: true,
         responseTime,
         statusCode: response.status,
+        // These fields are optional and depend on backend implementation
         hasClerkKey: !!data.clerk_publishable_key,
         source: data.source || 'unknown'
       };
@@ -186,25 +188,23 @@ class BackendIntegrationTester {
       
       const data = await response.json();
       
-      // Validate response structure
-      if (!data.status) {
-        throw new Error('Response missing status field');
+      // Backend contract: { success: boolean, data: { ... }, processing_time, ... }
+      if (typeof data.success !== 'boolean') {
+        throw new Error('Response missing success field');
       }
-      
-      if (data.status === 'error') {
+      if (!data.data) {
+        throw new Error('Response missing data field');
+      }
+      if (data.success === false) {
         throw new Error(`Backend returned error: ${data.error || 'Unknown error'}`);
-      }
-      
-      if (!data.result) {
-        throw new Error('Response missing result field');
       }
       
       return {
         service: serviceType,
-        status: data.status,
+        success: data.success,
         responseTime,
-        hasResult: !!data.result,
-        resultKeys: Object.keys(data.result || {}),
+        hasData: !!data.data,
+        dataKeys: Object.keys(data.data || {}),
         processingTime: data.processing_time || 0
       };
     } catch (error) {
@@ -219,45 +219,68 @@ class BackendIntegrationTester {
     const startTime = Date.now();
     const testText = "This is a comprehensive test that should trigger multiple guard services.";
     
-    const payload = {
-      service_type: 'unified', // or omit to use all enabled guards
-      payload: {
-        text: testText,
-        contentType: 'text',
-        scanLevel: 'comprehensive',
-        context: 'webpage-content'
-      },
-      session_id: `test_unified_${Date.now()}`,
-      client_type: 'chrome',
-      client_version: '1.0.0'
-    };
+    // Instead of using a non-existent "unified" service_type, call the unified
+    // processing endpoint once per guard type and aggregate the results.
+    const serviceTypes = ['tokenguard', 'trustguard', 'contextguard', 'biasguard'];
+    const results = [];
 
-    try {
-      const response = await this.makeRequest('POST', '/api/v1/guards/process', payload);
-      const responseTime = Date.now() - startTime;
-      
-      // If no Clerk token, expect 403 (authentication required)
-      if (!this.config.clerkToken && response.status === 403) {
-        throw new Error('Authentication required: This endpoint requires Clerk session token. Set CLERK_SESSION_TOKEN environment variable or authenticate in extension.');
-      }
-      
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => 'Unknown error');
-        throw new Error(`Unified analysis failed: ${response.status} ${response.statusText} - ${errorText}`);
-      }
-      
-      const data = await response.json();
-      
-      return {
-        status: data.status,
-        responseTime,
-        hasResult: !!data.result,
-        servicesProcessed: Array.isArray(data.results) ? data.results.length : 1,
-        processingTime: data.processing_time || 0
+    for (const serviceType of serviceTypes) {
+      const payload = {
+        service_type: serviceType,
+        payload: {
+          text: testText,
+          contentType: 'text',
+          scanLevel: 'comprehensive',
+          context: 'webpage-content'
+        },
+        session_id: `test_unified_${Date.now()}_${serviceType}`,
+        client_type: 'chrome',
+        client_version: '1.0.0'
       };
-    } catch (error) {
-      throw new Error(`Unified analysis error: ${error.message}`);
+
+      try {
+        const response = await this.makeRequest('POST', '/api/v1/guards/process', payload);
+        
+        // If no Clerk token, expect 403 (authentication required)
+        if (!this.config.clerkToken && response.status === 403) {
+          throw new Error('Authentication required: This endpoint requires Clerk session token. Set CLERK_SESSION_TOKEN environment variable or authenticate in extension.');
+        }
+        
+        if (!response.ok) {
+          const errorText = await response.text().catch(() => 'Unknown error');
+          throw new Error(`Guard ${serviceType} unified call failed: ${response.status} ${response.statusText} - ${errorText}`);
+        }
+
+        const data = await response.json();
+        results.push({
+          serviceType,
+          success: data.success === true,
+          data: data.data || null,
+          processingTime: data.processing_time || 0
+        });
+      } catch (error) {
+        results.push({
+          serviceType,
+          success: false,
+          error: error.message
+        });
+      }
     }
+
+    const successful = results.filter(r => r.success);
+    if (successful.length === 0) {
+      throw new Error('Unified analysis failed: no guard services responded successfully');
+    }
+
+    const totalDuration = Date.now() - startTime;
+
+    return {
+      servicesTested: serviceTypes.length,
+      servicesSuccessful: successful.length,
+      responseTime: totalDuration,
+      processingTimes: successful.map(r => r.processingTime),
+      results
+    };
   }
 
   /**
@@ -426,8 +449,8 @@ class BackendIntegrationTester {
     const startTime = Date.now();
     
     try {
-      // Get public configuration (doesn't require authentication)
-      const response = await this.makeRequest('GET', '/api/v1/config/public', null);
+      // Get system configuration (doesn't require authentication per backend guide)
+      const response = await this.makeRequest('GET', '/api/v1/config/config', null);
       const responseTime = Date.now() - startTime;
       
       if (!response.ok) {

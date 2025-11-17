@@ -217,5 +217,11 @@ const safeConcat = stringOptimizer.safeConcat.bind(stringOptimizer);
 const safeSplit = stringOptimizer.safeSplit.bind(stringOptimizer);
 const safeTrim = stringOptimizer.safeTrim.bind(stringOptimizer);
 
+// Expose class and instance on window for browser/unit-test usage
+if (typeof window !== 'undefined') {
+  window.StringOptimizer = StringOptimizer;
+  window.stringOptimizer = stringOptimizer;
+}
+
 
 
