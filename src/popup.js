@@ -819,6 +819,25 @@
       console.warn('[Popup] signOutBtn not found in DOM (may be hidden)');
     }
 
+    // Status button - show diagnostic panel
+    const toggleStatusBtn = document.getElementById('toggleStatusBtn');
+    if (toggleStatusBtn) {
+      const clickHandler = () => {
+        try {
+          showDiagnosticPanel();
+          Logger.info('[Popup] Diagnostic panel opened via Status button');
+        } catch (err) {
+          Logger.error('[Popup] Failed to show diagnostic panel', err);
+          showFallbackError('Failed to open diagnostic panel. Please try again.');
+        }
+      };
+      
+      toggleStatusBtn.addEventListener('click', clickHandler);
+      eventListeners.push({ element: toggleStatusBtn, event: 'click', handler: clickHandler });
+      Logger.info('[Popup] Status button listener attached (shows diagnostic panel)');
+    } else {
+      Logger.warn('[Popup] toggleStatusBtn not found in DOM');
+    }
 
     const closeDiagnosticBtn = document.getElementById('closeDiagnostic');
     if (closeDiagnosticBtn) {
