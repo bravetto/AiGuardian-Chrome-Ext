@@ -325,6 +325,12 @@
    */
   function highlightSelection(range, score) {
     try {
+      // Check if range is collapsed (no selection)
+      if (range.collapsed) {
+        Logger.warn('[CS] Range is collapsed, cannot highlight');
+        return;
+      }
+
       const highlightSpan = document.createElement('span');
       highlightSpan.style.backgroundColor = getScoreColor(score);
       highlightSpan.style.color = '#FFFFFF';
@@ -332,11 +338,29 @@
       highlightSpan.style.padding = '2px 1px';
       highlightSpan.className = 'aiguardian-highlight'; // Add class for easy cleanup
 
-      // The surroundContents method is a clean way to wrap the selection.
+      // Try surroundContents first (preferred method - clean and simple)
       // It can fail if the selection spans across incompatible DOM nodes.
-      range.surroundContents(highlightSpan);
-
-      activeHighlights.push(highlightSpan);
+      try {
+        range.surroundContents(highlightSpan);
+        activeHighlights.push(highlightSpan);
+      } catch (surroundError) {
+        // Fallback: Manual DOM manipulation for incompatible nodes
+        Logger.warn('[CS] surroundContents failed, using fallback method:', surroundError.message);
+        
+        try {
+          // Extract contents and wrap in highlight span
+          const contents = range.extractContents();
+          highlightSpan.appendChild(contents);
+          
+          // Insert the highlighted span at the range start
+          range.insertNode(highlightSpan);
+          
+          activeHighlights.push(highlightSpan);
+        } catch (fallbackError) {
+          Logger.error('[CS] Fallback highlighting also failed:', fallbackError.message);
+          // Silently fail - highlighting is non-critical, analysis still works
+        }
+      }
     } catch (e) {
       Logger.error('[CS] Failed to highlight text:', e.message);
     }

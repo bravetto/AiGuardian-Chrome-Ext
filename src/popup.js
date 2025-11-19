@@ -325,6 +325,21 @@
         // Force check user session again after initialization
         Logger.info('[Popup] Clerk initialized, checking user session...');
         await auth.checkUserSession();
+        
+        // CRITICAL: Ensure token is retrieved and stored for service worker access
+        if (auth.isAuthenticated()) {
+          try {
+            const token = await auth.getToken();
+            if (token) {
+              Logger.info('[Popup] Token refreshed and stored for service worker');
+            } else {
+              Logger.warn('[Popup] No token available after authentication check');
+            }
+          } catch (tokenError) {
+            Logger.warn('[Popup] Error refreshing token (non-critical):', tokenError.message);
+          }
+        }
+        
         await updateAuthUI();
       } else {
         Logger.warn('[Popup] Authentication not configured');
@@ -670,6 +685,34 @@
     }
 
     if (isAuth) {
+      // CRITICAL: Refresh and store token when user is authenticated
+      // This ensures service worker can access the token
+      if (auth && auth.isAuthenticated()) {
+        try {
+          const token = await auth.getToken();
+          if (token) {
+            Logger.info('[Popup] Token refreshed in updateAuthUI for service worker access');
+          } else {
+            Logger.warn('[Popup] No token available in updateAuthUI - service worker may fail to authenticate');
+          }
+        } catch (tokenError) {
+          Logger.warn('[Popup] Error refreshing token in updateAuthUI (non-critical):', tokenError.message);
+        }
+      } else if (hasStoredUser && auth) {
+        // User is in storage but auth object might not be initialized - try to get token
+        try {
+          if (!auth.isInitialized) {
+            await auth.initialize();
+          }
+          const token = await auth.getToken();
+          if (token) {
+            Logger.info('[Popup] Token retrieved from auth object for stored user');
+          }
+        } catch (tokenError) {
+          Logger.warn('[Popup] Could not get token for stored user:', tokenError.message);
+        }
+      }
+      
       // Get user data - from auth object if available, otherwise from storage
       let user = null;
       let avatarUrl = null;
@@ -1610,12 +1653,133 @@
       }
     }
     
-    // Determine auth status
+    // Determine auth status and verify token is stored
     chrome.storage.local.get(['clerk_user', 'clerk_token'], (data) => {
       if (authStatus) {
         if (data.clerk_user && data.clerk_token) {
           authStatus.textContent = '✅ Signed In';
           authStatus.className = 'connection-value connected';
+          
+          // Verify token format
+          const tokenParts = data.clerk_token.split('.');
+          if (tokenParts.length !== 3) {
+            Logger.warn('[Popup] Token format invalid - refreshing token');
+            // Try to refresh token if format is invalid (async, don't await)
+            if (auth && auth.isAuthenticated()) {
+              auth.getToken().then((refreshedToken) => {
+                if (refreshedToken) {
+                  Logger.info('[Popup] Token refreshed successfully');
+                }
+              }).catch((e) => {
+                Logger.error('[Popup] Failed to refresh invalid token:', e);
+              });
+            }
+          }
+        } else if (data.clerk_user && !data.clerk_token) {
+          // User exists but token is missing - try to get it
+          Logger.warn('[Popup] User found but token missing - attempting to retrieve token');
+          authStatus.textContent = '⚠️ Token Missing';
+          authStatus.className = 'connection-value auth-required';
+          
+          // Try to get token - check if auth object needs to be synced first
+          const tryGetToken = async () => {
+            try {
+              Logger.info('[Popup] Starting token retrieval process...');
+              
+              // If auth doesn't exist, create and initialize it
+              if (!auth) {
+                Logger.info('[Popup] Auth object missing - initializing to retrieve token');
+                auth = new AiGuardianAuth();
+                await auth.initialize();
+              }
+              
+              // Ensure auth is initialized
+              if (!auth.isInitialized) {
+                Logger.info('[Popup] Auth not initialized - initializing now');
+                await auth.initialize();
+              }
+              
+              // Sync user session to ensure auth object has the user
+              Logger.info('[Popup] Checking user session to sync auth state...');
+              await auth.checkUserSession();
+              
+              // Now try to get the token - with retry logic if needed
+              // This handles cases where Clerk SDK session isn't ready immediately
+              Logger.info('[Popup] Attempting to retrieve token from Clerk...');
+              let token = await auth.getToken();
+              
+              // If token retrieval failed, try again with retries
+              if (!token && auth.clerk) {
+                Logger.warn('[Popup] Initial token retrieval failed, attempting retries...');
+                const maxRetries = 3;
+                const retryDelay = 300;
+                
+                for (let retry = 0; retry < maxRetries && !token; retry++) {
+                  Logger.info(`[Popup] Token retrieval retry ${retry + 1}/${maxRetries}...`);
+                  await new Promise((resolve) => setTimeout(resolve, retryDelay));
+                  
+                  // Try reloading Clerk SDK to refresh session state
+                  if (typeof auth.clerk.load === 'function' && !auth.clerk.loaded) {
+                    await auth.clerk.load();
+                  }
+                  
+                  // Try getting token again
+                  token = await auth.getToken();
+                  
+                  if (token) {
+                    Logger.info(`[Popup] ✅ Token retrieved successfully on retry ${retry + 1}`);
+                    break;
+                  }
+                }
+              }
+              
+              if (token) {
+                Logger.info('[Popup] ✅ Token retrieved and stored successfully');
+                // Update UI immediately
+                authStatus.textContent = '✅ Signed In';
+                authStatus.className = 'connection-value connected';
+                
+                // Also trigger a storage update check to refresh any other UI elements
+                chrome.storage.local.get(['clerk_token'], (updatedData) => {
+                  if (updatedData.clerk_token) {
+                    Logger.info('[Popup] Token confirmed in storage after retrieval');
+                  }
+                });
+              } else {
+                Logger.warn('[Popup] ⚠️ Token retrieval returned null - checking why...');
+                
+                // Check if Clerk is available
+                const hasClerk = auth.clerk && typeof window !== 'undefined' && window.Clerk;
+                Logger.warn('[Popup] Clerk availability:', {
+                  hasAuthClerk: !!auth.clerk,
+                  hasWindowClerk: typeof window !== 'undefined' && !!window.Clerk,
+                  authInitialized: auth.isInitialized,
+                  hasUser: !!auth.user,
+                  hasStoredUser: !!data.clerk_user
+                });
+                
+                // If Clerk isn't available, user might need to sign in again
+                if (!hasClerk) {
+                  Logger.warn('[Popup] Clerk SDK not available - user may need to sign in again');
+                  authStatus.textContent = '⚠️ Token Missing';
+                  authStatus.className = 'connection-value auth-required';
+                }
+              }
+            } catch (e) {
+              Logger.error('[Popup] ❌ Failed to retrieve missing token:', e);
+              Logger.error('[Popup] Error details:', {
+                message: e.message,
+                stack: e.stack,
+                name: e.name
+              });
+              // Keep showing "Token Missing" on error
+              authStatus.textContent = '⚠️ Token Missing';
+              authStatus.className = 'connection-value auth-required';
+            }
+          };
+          
+          // Call async function without blocking UI
+          tryGetToken();
         } else {
           authStatus.textContent = '🔒 Not Signed In';
           authStatus.className = 'connection-value auth-required';

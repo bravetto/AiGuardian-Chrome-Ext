@@ -1473,8 +1473,29 @@ class AiGuardianGateway {
             });
             
             if (firstResult.is_poisoned === false) {
-              score = 0;
-              scoreSource = 'derived from raw_response[0].is_poisoned=false (fallback)';
+              // Calculate bias score from confidence when bias_score is missing
+              // When is_poisoned=false, backend determined text is NOT biased
+              // Higher confidence in "not poisoned" = lower bias score
+              const confidence = typeof firstResult.confidence === 'number' && !Number.isNaN(firstResult.confidence)
+                ? firstResult.confidence
+                : 1.0;
+              
+              // Since is_poisoned=false, we know it's NOT biased, so score should be low
+              // Scale uncertainty to a low bias range (0-0.3) to reflect "not biased" determination
+              // confidence=1.0 → score=0.0 (very confident it's not biased)
+              // confidence=0.5 → score=0.15 (uncertain, but still "not biased")
+              // confidence=0.0 → score=0.3 (not confident, but backend says "not biased")
+              const uncertainty = 1 - confidence;
+              const calculatedScore = uncertainty * 0.3; // Scale to 0-0.3 range
+              score = ScoreUtils.clampScore(calculatedScore);
+              scoreSource = 'derived from raw_response[0].confidence (is_poisoned=false fallback)';
+              
+              Logger.info('[Gateway] Calculated score from confidence (is_poisoned=false):', {
+                confidence,
+                uncertainty: uncertainty.toFixed(2),
+                calculatedScore: score,
+                scorePercentage: (score * 100).toFixed(1) + '%'
+              });
             } else if (firstResult.is_poisoned === true) {
               const confidence = typeof firstResult.confidence === 'number' && !Number.isNaN(firstResult.confidence)
                 ? firstResult.confidence
@@ -1694,6 +1715,23 @@ class AiGuardianGateway {
         }
       } else {
         Logger.warn('[Gateway] No stored token found in chrome.storage.local');
+        
+        // Retry logic: Sometimes token storage hasn't completed yet
+        // Wait a short time and retry once (for timing issues)
+        Logger.info('[Gateway] Retrying token retrieval after short delay...');
+        await this.delay(100); // 100ms delay
+        
+        // Retry reading from storage directly (avoid recursion)
+        const retryData = await new Promise((resolve) => {
+          chrome.storage.local.get(['clerk_token'], (data) => {
+            resolve(data.clerk_token || null);
+          });
+        });
+        
+        if (retryData && this.validateTokenFormat(retryData)) {
+          Logger.info('[Gateway] Token found on retry');
+          return retryData;
+        }
       }
 
       Logger.warn('[Gateway] No Clerk token available - user must sign in');
