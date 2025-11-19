@@ -191,14 +191,28 @@
     }
 
     // Validate that we have a valid score before displaying
+    // Handle three cases: null/undefined (missing), valid number including 0, invalid type
     if (response.score === undefined || response.score === null) {
-      Logger.warn('[CS] ⚠️ Analysis response missing score:', {
+      Logger.warn('[CS] ⚠️ Analysis response missing score (null/undefined):', {
         responseKeys: Object.keys(response || {}),
         responsePreview: JSON.stringify(response).substring(0, 500),
         hasAnalysis: !!response?.analysis,
-        analysisKeys: response?.analysis ? Object.keys(response?.analysis) : []
+        analysisKeys: response?.analysis ? Object.keys(response?.analysis) : [],
+        scoreValue: response.score,
+        scoreType: typeof response.score,
       });
-      showErrorBadge('Analysis incomplete. Please try again.', 'warning');
+      showErrorBadge('Analysis incomplete. Score not available.', 'warning');
+      return;
+    }
+
+    // Validate score is a number
+    if (typeof response.score !== 'number' || Number.isNaN(response.score)) {
+      Logger.warn('[CS] ⚠️ Analysis response has invalid score type:', {
+        score: response.score,
+        scoreType: typeof response.score,
+        isNaN: Number.isNaN(response.score),
+      });
+      showErrorBadge('Analysis incomplete. Invalid score format.', 'warning');
       return;
     }
     
@@ -208,22 +222,26 @@
       scoreType: typeof response.score,
       isNumber: typeof response.score === 'number',
       isNaN: Number.isNaN(response.score),
-      scorePercentage: Math.round(response.score * 100),
+      scorePercentage: response.score !== null ? Math.round(response.score * 100) : 'N/A',
+      isZero: response.score === 0,
+      isMissing: response.score === null || response.score === undefined,
       biasTypes: response.analysis?.bias_types || [],
       biasType: response.analysis?.bias_type,
       confidence: response.analysis?.confidence,
       responseStructure: {
-        hasScore: response.score !== undefined,
+        hasScore: response.score !== undefined && response.score !== null,
         hasAnalysis: !!response.analysis,
         analysisKeys: response.analysis ? Object.keys(response.analysis) : []
       }
     });
 
-    // TRACER BULLET: Highlight the text on the page
-    if (range && typeof response.score === 'number') {
+    // TRACER BULLET: Highlight the text on the page (only if score is a valid number)
+    if (range && typeof response.score === 'number' && !Number.isNaN(response.score)) {
       highlightSelection(range, response.score);
     }
 
+    // Convert score to percentage (0-100)
+    // Note: score of 0 is valid (backend explicitly returned 0, meaning no bias detected)
     const score = Math.round(response.score * 100);
     const analysis = response.analysis || {};
 
@@ -234,6 +252,7 @@
     badgeContent.style.cssText = 'display: flex; align-items: center; gap: 8px;';
 
     const scoreSpan = document.createElement('span');
+    // Display score: 0% is valid (no bias), null would have been caught above
     scoreSpan.textContent = 'Bias Score: ' + score + '%';
 
     const confidenceSpan = document.createElement('span');

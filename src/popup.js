@@ -1616,7 +1616,7 @@
 
     // Validate that we have a valid result before displaying
     if (
-      result.score === undefined &&
+      (result.score === undefined || result.score === null) &&
       (!result.analysis || Object.keys(result.analysis).length === 0)
     ) {
       Logger.warn('[Popup] Analysis result missing score and analysis data:', result);
@@ -1639,13 +1639,18 @@
     const biasType = document.getElementById('biasType');
     const confidence = document.getElementById('confidence');
 
-    // Only display score if it's a valid number (not 0 from error)
-    if (biasScore && result.score !== undefined && typeof result.score === 'number') {
-      // Check if score is 0 due to error (error responses might have score: 0)
-      if (result.score === 0 && (!result.analysis || Object.keys(result.analysis).length === 0)) {
+    // Handle score display: distinguish between null (missing), 0 (valid zero), and valid scores
+    if (biasScore) {
+      // Case 1: Score is null or undefined (missing from backend)
+      if (result.score === null || result.score === undefined) {
+        Logger.warn('[Popup] Score is null/undefined (missing from backend response)');
         biasScore.textContent = 'N/A';
         biasScore.className = 'score-value';
-      } else {
+      }
+      // Case 2: Score is a valid number (including 0)
+      else if (typeof result.score === 'number' && !Number.isNaN(result.score)) {
+        // Score of 0 is valid if we have analysis data (backend explicitly returned 0)
+        // Score of 0 without analysis data might indicate an error, but we'll trust the backend
         biasScore.textContent = result.score.toFixed(2);
 
         // Update score color based on value
@@ -1657,6 +1662,15 @@
         } else {
           biasScore.classList.add('high');
         }
+      }
+      // Case 3: Score is invalid (not a number)
+      else {
+        Logger.warn('[Popup] Score is not a valid number:', {
+          score: result.score,
+          scoreType: typeof result.score,
+        });
+        biasScore.textContent = 'N/A';
+        biasScore.className = 'score-value';
       }
     }
 

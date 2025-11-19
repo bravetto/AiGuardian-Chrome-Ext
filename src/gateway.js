@@ -1167,92 +1167,208 @@ class AiGuardianGateway {
 
       const data = response.data || {};
 
-      // DEBUG: Log response structure to diagnose score extraction issues
-      Logger.info('[Gateway] Extracting score from response', {
+      // Helper function to safely extract and convert score values
+      const extractScore = (value, source) => {
+        if (value === null || value === undefined) {
+          return null;
+        }
+        // Handle string-to-number conversion
+        if (typeof value === 'string') {
+          const parsed = parseFloat(value);
+          if (!Number.isNaN(parsed)) {
+            Logger.info(`[Gateway] Converted string score to number from ${source}:`, parsed);
+            return parsed;
+          }
+          return null;
+        }
+        // Handle number type
+        if (typeof value === 'number' && !Number.isNaN(value)) {
+          return value;
+        }
+        return null;
+      };
+
+      // DEBUG: Comprehensive logging of full response structure
+      Logger.info('[Gateway] 🔍 Extracting score from response - Full structure analysis', {
         hasData: !!response.data,
+        responseKeys: Object.keys(response),
         dataKeys: response.data ? Object.keys(response.data) : [],
-        dataPreview: response.data ? JSON.stringify(response.data).substring(0, 500) : 'null',
-        bias_score: data.bias_score,
-        trust_score: data.trust_score,
-        confidence: data.confidence,
-        score: data.score,
+        dataPreview: response.data ? JSON.stringify(response.data).substring(0, 1000) : 'null',
+        // Check all possible score locations
+        directFields: {
+          bias_score: data.bias_score,
+          trust_score: data.trust_score,
+          confidence: data.confidence,
+          score: data.score,
+        },
+        nestedFields: {
+          'data.result?.bias_score': data.result?.bias_score,
+          'data.result?.score': data.result?.score,
+          'data.analysis?.bias_score': data.analysis?.bias_score,
+          'data.analysis?.score': data.analysis?.score,
+          'response.bias_score': response.bias_score,
+          'response.score': response.score,
+          'response.confidence_score': response.confidence_score,
+        },
       });
 
       // Derive a generic score for the UI from common guard fields.
       let score = null; // Use null to distinguish "not found" from "found but zero"
       let scoreSource = 'none';
       
-      if (typeof data.bias_score === 'number') {
-        score = data.bias_score; // BiasGuard
-        scoreSource = 'data.bias_score';
-        Logger.info('[Gateway] Using bias_score:', score);
-      } else if (typeof data.trust_score === 'number') {
-        score = data.trust_score; // TrustGuard
-        scoreSource = 'data.trust_score';
-        Logger.info('[Gateway] Using trust_score:', score);
-      } else if (typeof data.confidence === 'number') {
-        score = data.confidence; // TokenGuard-style confidence
-        scoreSource = 'data.confidence';
-        Logger.info('[Gateway] Using confidence:', score);
-      } else if (typeof data.score === 'number') {
-        score = data.score; // Fallback generic score
-        scoreSource = 'data.score';
-        Logger.info('[Gateway] Using score:', score);
+      // Determine service type to prioritize correct score field
+      const serviceType = response.service_type || response.serviceType || 'unknown';
+      Logger.info('[Gateway] Service type detected:', serviceType);
+      
+      // Service-specific extraction paths (prioritize correct field for each guard)
+      let extractionPaths = [];
+      
+      if (serviceType === 'biasguard' || serviceType === 'bias_guard') {
+        // For BiasGuard, ONLY use bias_score (confidence is metadata, not the score)
+        extractionPaths = [
+          { value: data.bias_score, source: 'data.bias_score' },
+          { value: data.result?.bias_score, source: 'data.result.bias_score' },
+          { value: data.analysis?.bias_score, source: 'data.analysis.bias_score' },
+          { value: response.bias_score, source: 'response.bias_score' },
+          // Generic fallbacks only if bias_score not found
+          { value: data.score, source: 'data.score' },
+          { value: response.score, source: 'response.score' },
+        ];
+      } else if (serviceType === 'trustguard' || serviceType === 'trust_guard') {
+        // For TrustGuard, prioritize trust_score
+        extractionPaths = [
+          { value: data.trust_score, source: 'data.trust_score' },
+          { value: data.result?.trust_score, source: 'data.result.trust_score' },
+          { value: data.score, source: 'data.score' },
+          { value: response.trust_score, source: 'response.trust_score' },
+          { value: response.score, source: 'response.score' },
+        ];
       } else {
-        Logger.warn('[Gateway] No score field found in response data', {
-          availableFields: Object.keys(data),
-          dataSample: JSON.stringify(data).substring(0, 200),
-        });
+        // Generic extraction for unknown or other service types
+        extractionPaths = [
+          { value: data.bias_score, source: 'data.bias_score' },
+          { value: data.trust_score, source: 'data.trust_score' },
+          { value: data.score, source: 'data.score' },
+          { value: data.confidence, source: 'data.confidence' },
+          // Nested paths
+          { value: data.result?.bias_score, source: 'data.result.bias_score' },
+          { value: data.result?.trust_score, source: 'data.result.trust_score' },
+          { value: data.result?.score, source: 'data.result.score' },
+          { value: data.analysis?.bias_score, source: 'data.analysis.bias_score' },
+          { value: data.analysis?.score, source: 'data.analysis.score' },
+          // Top-level fallbacks
+          { value: response.bias_score, source: 'response.bias_score' },
+          { value: response.score, source: 'response.score' },
+          { value: response.confidence_score, source: 'response.confidence_score' },
+        ];
       }
 
-      // EPISTEMIC: Fallback to top-level fields if not found in data
-      // This handles cases where response structure varies
-      if (score === null) {
-        if (typeof response.bias_score === 'number') {
-          score = response.bias_score;
-          scoreSource = 'response.bias_score';
-          Logger.info('[Gateway] Found bias_score at top level, using it:', score);
-        } else if (typeof response.score === 'number') {
-          score = response.score;
-          scoreSource = 'response.score';
-          Logger.info('[Gateway] Found score at top level, using it:', score);
-        } else if (typeof response.confidence_score === 'number') {
-          score = response.confidence_score;
-          scoreSource = 'response.confidence_score';
-          Logger.info('[Gateway] Found confidence_score at top level, using it:', score);
+      // Try each extraction path
+      for (const path of extractionPaths) {
+        const extracted = extractScore(path.value, path.source);
+        if (extracted !== null) {
+          score = extracted;
+          scoreSource = path.source;
+          Logger.info(`[Gateway] ✅ Found score at ${path.source}:`, score);
+          break;
         }
       }
 
-      // If still no score found, default to 0
-      if (score === null) {
-        Logger.warn('[Gateway] No score found anywhere in response, defaulting to 0', {
-          responseKeys: Object.keys(response),
-          dataKeys: Object.keys(data),
-        });
-        score = 0;
-        scoreSource = 'default (0)';
+      // FALLBACK: For BiasGuard, derive score from raw_response if bias_score not found
+      if (score === null && (serviceType === 'biasguard' || serviceType === 'bias_guard')) {
+        Logger.info('[Gateway] Attempting to derive bias_score from raw_response data');
+        
+        // Check for raw_response array
+        const rawResponse = data.raw_response;
+        if (Array.isArray(rawResponse) && rawResponse.length > 0) {
+          const firstResult = rawResponse[0];
+          
+          // If is_poisoned field exists, derive score from it
+          if (typeof firstResult.is_poisoned === 'boolean') {
+            if (firstResult.is_poisoned === false) {
+              // No bias detected → score is 0
+              score = 0;
+              scoreSource = 'derived from raw_response[0].is_poisoned=false';
+              Logger.info('[Gateway] ✅ Derived bias_score=0 from is_poisoned=false');
+            } else if (firstResult.is_poisoned === true) {
+              // Bias detected → calculate score from confidence
+              // If confidence exists, use (1 - confidence) as bias score
+              // Higher confidence in "poisoned" = higher bias score
+              if (typeof firstResult.confidence === 'number' && !Number.isNaN(firstResult.confidence)) {
+                // Confidence is typically 0-1, where 1 = high confidence it's poisoned
+                // Bias score = confidence (since higher confidence in poisoning = higher bias)
+                score = Math.min(Math.max(firstResult.confidence, 0), 1); // Clamp to 0-1
+                scoreSource = 'derived from raw_response[0].is_poisoned=true, confidence';
+                Logger.info('[Gateway] ✅ Derived bias_score from is_poisoned=true and confidence:', score);
+              } else {
+                // Bias detected but no confidence → default to 0.5 (moderate bias)
+                score = 0.5;
+                scoreSource = 'derived from raw_response[0].is_poisoned=true (default)';
+                Logger.info('[Gateway] ✅ Derived bias_score=0.5 from is_poisoned=true (no confidence)');
+              }
+            }
+          }
+          // Alternative: Check if confidence field exists and can be used
+          else if (typeof firstResult.confidence === 'number' && !Number.isNaN(firstResult.confidence)) {
+            // If confidence exists but is_poisoned doesn't, use confidence as bias score
+            // Note: This assumes confidence represents bias level (higher = more bias)
+            score = Math.min(Math.max(firstResult.confidence, 0), 1); // Clamp to 0-1
+            scoreSource = 'derived from raw_response[0].confidence';
+            Logger.info('[Gateway] ✅ Derived bias_score from confidence:', score);
+          }
+        }
       }
 
-      // Final validation and clamping
-      if (typeof score === 'number' && !Number.isNaN(score)) {
-        if (score < 0) {score = 0;}
-        if (score > 1) {score = 1;}
-      } else {
-        Logger.warn('[Gateway] Score is not a valid number, defaulting to 0', {
-          scoreType: typeof score,
-          isNaN: Number.isNaN(score),
-          scoreValue: score,
+      // Log all attempted paths if score still not found
+      if (score === null) {
+        Logger.warn('[Gateway] ⚠️ No score found in any expected location. Attempted paths:', {
+          attemptedPaths: extractionPaths.map(p => ({
+            path: p.source,
+            value: p.value,
+            type: typeof p.value,
+            isNull: p.value === null,
+            isUndefined: p.value === undefined,
+          })),
+          responseKeys: Object.keys(response),
+          dataKeys: Object.keys(data),
+          fullResponsePreview: JSON.stringify(response).substring(0, 1000),
         });
-        score = 0;
-        scoreSource = 'default (invalid)';
+        // Keep score as null (don't default to 0) - let UI handle missing score
+        scoreSource = 'not found';
+      }
+
+      // Final validation and clamping (only if score was found)
+      if (score !== null) {
+        if (typeof score === 'number' && !Number.isNaN(score)) {
+          // Clamp to 0-1 range
+          if (score < 0) {
+            Logger.warn('[Gateway] Score < 0, clamping to 0:', score);
+            score = 0;
+          }
+          if (score > 1) {
+            Logger.warn('[Gateway] Score > 1, clamping to 1:', score);
+            score = 1;
+          }
+        } else {
+          Logger.warn('[Gateway] Score is not a valid number after extraction, setting to null', {
+            scoreType: typeof score,
+            isNaN: Number.isNaN(score),
+            scoreValue: score,
+            scoreSource,
+          });
+          score = null;
+          scoreSource = 'invalid (not a number)';
+        }
       }
       
       Logger.info('[Gateway] ✅ Final extracted score:', {
         score: score,
-        percentage: Math.round(score * 100) + '%',
+        scoreType: score === null ? 'null (missing)' : typeof score,
+        percentage: score !== null ? Math.round(score * 100) + '%' : 'N/A',
         source: scoreSource,
         isZero: score === 0,
-        isZeroBecauseNotFound: score === 0 && scoreSource.includes('default')
+        isMissing: score === null,
+        isZeroBecauseNotFound: false, // We no longer default to 0
       });
 
       transformedResponse = {
