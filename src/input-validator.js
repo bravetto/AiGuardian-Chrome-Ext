@@ -20,10 +20,10 @@ class InputValidator {
     
     // Check for potentially malicious content
     const maliciousPatterns = [
-      /<script[^>]*>.*?</script>/gi,
+      /<script[^>]*>[\s\S]*?<\/script>/gi,
       /javascript:/gi,
-      /onw+s*=/gi,
-      /<iframe[^>]*>.*?</iframe>/gi
+      /on\w+\s*=/gi,
+      /<iframe[^>]*>[\s\S]*?<\/iframe>/gi
     ];
     
     for (const pattern of maliciousPatterns) {
@@ -91,11 +91,8 @@ class InputValidator {
       return '';
     }
     
-    // Remove all HTML tags with bounds checking
-    if (typeof html === 'string' && html.length > 0) {
-      return html.replace(/<[^>]*>/g, '');
-    }
-    return html;
+    // Remove all HTML tags
+    return html.replace(/<[^>]*>/g, '');
   }
   
   /**
