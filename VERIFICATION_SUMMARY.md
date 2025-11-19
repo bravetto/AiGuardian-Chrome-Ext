@@ -51,9 +51,9 @@ Backend API Response
 ### 3. UI Display ✅
 - **Content Script**: Shows "Bias Score: 75%" badge
 - **Popup**: Shows `0.75` with color coding:
-  - Green: < 0.3 (low bias)
-  - Orange: 0.3 - 0.7 (medium bias)
-  - Red: > 0.7 (high bias)
+  - Green: score < 0.3 (low bias)
+  - Orange: 0.3 <= score < 0.7 (medium bias)
+  - Red: score >= 0.7 (high bias)
 
 ### 4. Logging ✅
 - **Gateway**: Logs score extraction (lines 1171-1256)
