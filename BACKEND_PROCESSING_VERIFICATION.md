@@ -204,7 +204,7 @@ if (biasScore && result.score !== undefined && typeof result.score === 'number')
 
 **Display Format**: 
 - Score: `0.75` (decimal format, 2 decimal places)
-- Color coding: Green (<0.3), Orange (0.3-0.7), Red (>0.7)
+- Color coding: Green (score < 0.3), Orange (0.3 <= score < 0.7), Red (score >= 0.7)
 
 ## Score Extraction Priority
 
