@@ -243,6 +243,7 @@ class AiGuardianGateway {
 
     this.logger = this.initializeLogger();
     this.centralLogger = null;
+    this.loggingEnabled = true; // Feature flag for central logging
     this.cacheManager = new CacheManager();
     this.subscriptionService = null; // Will be initialized after gateway is ready
 
@@ -400,8 +401,13 @@ class AiGuardianGateway {
   async initializeCentralLogging() {
     // Define log method first to avoid circular reference
     const logMethod = async (level, message, metadata = {}) => {
+      // Skip if logging is disabled (e.g., after 404 detection)
+      if (!this.loggingEnabled) {
+        return;
+      }
+
       try {
-        // Send to central logging service
+        // Send to central logging service (no retries, silent failures)
         await this.sendToGateway('logging', {
           level,
           message,
@@ -411,9 +417,14 @@ class AiGuardianGateway {
             extension_version: chrome.runtime.getManifest().version,
             user_agent: navigator.userAgent,
           },
-        });
+        }, { silent: true, noRetries: true });
       } catch (err) {
-        Logger.error('[Central Logger] Failed to send log:', err);
+        // Silently handle logging failures - don't clutter console
+        // If it's a 404, disable logging for future attempts
+        if (err.message && err.message.includes('404')) {
+          this.loggingEnabled = false;
+        }
+        // Don't log errors for logging failures - that would be recursive
       }
     };
 
@@ -428,8 +439,11 @@ class AiGuardianGateway {
 
   /**
    * Send request to central gateway with enhanced tracing
+   * @param {string} endpoint - The endpoint to call
+   * @param {Object} payload - The request payload
+   * @param {Object} options - Optional settings: { silent: boolean, noRetries: boolean }
    */
-  async sendToGateway(endpoint, payload) {
+  async sendToGateway(endpoint, payload, options = {}) {
     try {
       this.validateRequest(endpoint, payload);
     } catch (error) {
@@ -564,19 +578,22 @@ class AiGuardianGateway {
     // EPISTEMIC: Wrap fetch in circuit breaker for resilience
     const executeRequest = async () => {
       let lastError;
-      for (let attempt = 1; attempt <= this.config.retryAttempts; attempt++) {
+      const maxAttempts = options.noRetries ? 1 : this.config.retryAttempts;
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
-          this.logger.trace(`Attempt ${attempt}/${this.config.retryAttempts}`, {
-            requestId,
-            endpoint: mappedEndpoint,
-            attempt,
-          });
+          if (!options.silent) {
+            this.logger.trace(`Attempt ${attempt}/${maxAttempts}`, {
+              requestId,
+              endpoint: mappedEndpoint,
+              attempt,
+            });
+          }
           const response = await fetch(url, requestOptions);
           const responseTime = Date.now() - startTime;
 
           if (!response.ok) {
             // EPISTEMIC: Handle 401 with automatic token refresh
-            if (response.status === 401 && clerkToken && attempt < this.config.retryAttempts) {
+            if (response.status === 401 && clerkToken && attempt < maxAttempts && !options.noRetries) {
               try {
                 // Try to refresh token
                 const newToken = await this.refreshClerkToken();
@@ -657,6 +674,13 @@ class AiGuardianGateway {
                 return errorResponse;
               }
               throw new Error(errorResponse.error);
+            }
+
+            // For logging endpoint, silently handle 404s
+            if (endpoint === 'logging' && response.status === 404) {
+              this.loggingEnabled = false;
+              // Return silently without throwing error
+              return { success: false, error: 'Logging endpoint not available', silent: true };
             }
 
             // Try to parse JSON error response first
@@ -747,22 +771,27 @@ class AiGuardianGateway {
           lastError = err;
           const responseTime = Date.now() - startTime;
 
-          this.logger.error('Gateway request failed', {
-            requestId,
-            endpoint: mappedEndpoint,
-            attempt,
-            error: err.message,
-            responseTime,
-            errorType: err.name,
-          });
-
-          if (attempt < this.config.retryAttempts) {
-            const delayTime = this.config.retryDelay * attempt;
-            this.logger.trace(`Retrying in ${delayTime}ms`, {
+          // Don't log errors for silent requests (like logging endpoint)
+          if (!options.silent) {
+            this.logger.error('Gateway request failed', {
               requestId,
+              endpoint: mappedEndpoint,
               attempt,
-              nextAttempt: attempt + 1,
+              error: err.message,
+              responseTime,
+              errorType: err.name,
             });
+          }
+
+          if (attempt < maxAttempts && !options.noRetries) {
+            const delayTime = this.config.retryDelay * attempt;
+            if (!options.silent) {
+              this.logger.trace(`Retrying in ${delayTime}ms`, {
+                requestId,
+                attempt,
+                nextAttempt: attempt + 1,
+              });
+            }
             await this.delay(delayTime);
           }
         }
@@ -770,12 +799,14 @@ class AiGuardianGateway {
 
       // Final failure
       this.traceStats.failures++;
-      this.logger.error('All retry attempts failed', {
-        requestId,
-        endpoint: mappedEndpoint,
-        totalAttempts: this.config.retryAttempts,
-        finalError: lastError.message,
-      });
+      if (!options.silent) {
+        this.logger.error('All retry attempts failed', {
+          requestId,
+          endpoint: mappedEndpoint,
+          totalAttempts: maxAttempts,
+          finalError: lastError.message,
+        });
+      }
 
       throw lastError;
     };
@@ -1167,50 +1198,155 @@ class AiGuardianGateway {
 
       const data = response.data || {};
 
-      // Helper function to safely extract and convert score values
-      const extractScore = (value, source) => {
-        if (value === null || value === undefined) {
-          return null;
-        }
-        // Handle string-to-number conversion
-        if (typeof value === 'string') {
-          const parsed = parseFloat(value);
-          if (!Number.isNaN(parsed)) {
-            Logger.info(`[Gateway] Converted string score to number from ${source}:`, parsed);
-            return parsed;
+      // Score validation and clamping utilities (reusable across the codebase)
+      const ScoreUtils = {
+        /**
+         * Clamp a score value to valid range [0, 1]
+         * @param {number} score - Score to clamp
+         * @returns {number} Clamped score
+         */
+        clampScore(score) {
+          return Math.max(0, Math.min(1, score));
+        },
+
+        /**
+         * Validate if a value is a valid score (number, finite, in range)
+         * @param {*} value - Value to validate
+         * @returns {boolean} True if valid score
+         */
+        isValidScore(value) {
+          return typeof value === 'number' && 
+                 !Number.isNaN(value) && 
+                 isFinite(value) && 
+                 value >= 0 && 
+                 value <= 1;
+        },
+
+        /**
+         * Normalize a score value (clamp and validate)
+         * @param {*} value - Value to normalize
+         * @param {string} source - Source path for logging
+         * @returns {number|null} Normalized score or null if invalid
+         */
+        normalizeScore(value, source = 'unknown') {
+          if (value === null || value === undefined) {
+            return null;
           }
+          
+          // Handle string-to-number conversion
+          if (typeof value === 'string') {
+            const trimmed = value.trim();
+            if (trimmed === '' || trimmed.toLowerCase() === 'na' || trimmed.toLowerCase() === 'n/a') {
+              Logger.info(`[Gateway] Skipping string score "${value}" from ${source} (empty or N/A)`);
+              return null;
+            }
+            const parsed = parseFloat(trimmed);
+            if (!Number.isNaN(parsed) && isFinite(parsed)) {
+              const clamped = this.clampScore(parsed);
+              if (clamped !== parsed) {
+                Logger.warn(`[Gateway] Clamped score ${parsed} to ${clamped} from ${source}`);
+              }
+              Logger.info(`[Gateway] Converted string score "${value}" to number ${clamped} from ${source}`);
+              return clamped;
+            }
+            Logger.warn(`[Gateway] Failed to parse string score "${value}" from ${source}`);
+            return null;
+          }
+          
+          // Handle number type
+          if (typeof value === 'number') {
+            if (Number.isNaN(value)) {
+              Logger.warn(`[Gateway] Score is NaN from ${source}`);
+              return null;
+            }
+            if (!isFinite(value)) {
+              Logger.warn(`[Gateway] Score is not finite (Infinity) from ${source}`);
+              return null;
+            }
+            const clamped = this.clampScore(value);
+            if (clamped !== value) {
+              Logger.warn(`[Gateway] Clamped score ${value} to ${clamped} from ${source}`);
+            }
+            return clamped;
+          }
+          
+          // Handle boolean (convert true to 1.0, false to 0.0)
+          if (typeof value === 'boolean') {
+            Logger.info(`[Gateway] Converted boolean score ${value} to number ${value ? 1.0 : 0.0} from ${source}`);
+            return value ? 1.0 : 0.0;
+          }
+          
+          Logger.warn(`[Gateway] Score has unsupported type ${typeof value} from ${source}:`, value);
           return null;
         }
-        // Handle number type
-        if (typeof value === 'number' && !Number.isNaN(value)) {
-          return value;
-        }
-        return null;
       };
 
-      // DEBUG: Comprehensive logging of full response structure
-      Logger.info('[Gateway] 🔍 Extracting score from response - Full structure analysis', {
-        hasData: !!response.data,
-        responseKeys: Object.keys(response),
-        dataKeys: response.data ? Object.keys(response.data) : [],
-        dataPreview: response.data ? JSON.stringify(response.data).substring(0, 1000) : 'null',
-        // Check all possible score locations
-        directFields: {
-          bias_score: data.bias_score,
-          trust_score: data.trust_score,
-          confidence: data.confidence,
-          score: data.score,
-        },
-        nestedFields: {
-          'data.result?.bias_score': data.result?.bias_score,
-          'data.result?.score': data.result?.score,
-          'data.analysis?.bias_score': data.analysis?.bias_score,
-          'data.analysis?.score': data.analysis?.score,
-          'response.bias_score': response.bias_score,
-          'response.score': response.score,
-          'response.confidence_score': response.confidence_score,
-        },
-      });
+      // Helper function to safely extract and convert score values
+      const extractScore = (value, source) => {
+        return ScoreUtils.normalizeScore(value, source);
+      };
+
+      // DEBUG: Comprehensive logging - only log full structure in debug mode or on errors
+      const shouldLogFullStructure = 
+        this.config?.debugMode || 
+        this.config?.verboseLogging ||
+        false; // Set to true for debugging, false for production
+
+      if (shouldLogFullStructure) {
+        // Full detailed logging (existing code)
+        try {
+          const fullResponseStr = Logger._safeStringify ? Logger._safeStringify(response) : JSON.stringify(response);
+          Logger.info('[Gateway] 🔍 Extracting score from response - Full structure analysis', {
+            hasData: !!response.data,
+            responseKeys: Object.keys(response),
+            dataKeys: response.data ? Object.keys(response.data) : [],
+            fullResponse: fullResponseStr, // Full response, not truncated
+            // Check all possible score locations
+            directFields: {
+              bias_score: data.bias_score,
+              trust_score: data.trust_score,
+              confidence: data.confidence,
+              score: data.score,
+            },
+            nestedFields: {
+              'data.result?.bias_score': data.result?.bias_score,
+              'data.result?.score': data.result?.score,
+              'data.analysis?.bias_score': data.analysis?.bias_score,
+              'data.analysis?.score': data.analysis?.score,
+              'data.popup_data?.score': data.popup_data?.score,
+              'data.popup_data?.bias_score': data.popup_data?.bias_score,
+              'data.popup_data?.confidence': data.popup_data?.confidence,
+              'data.content_script_data?.bias_score': data.content_script_data?.bias_score,
+              'data.content_script_data?.score': data.content_script_data?.score,
+              'response.bias_score': response.bias_score,
+              'response.score': response.score,
+              'response.confidence_score': response.confidence_score,
+            },
+            rawResponseInfo: Array.isArray(data.raw_response) ? {
+              length: data.raw_response.length,
+              firstItemKeys: data.raw_response[0] ? Object.keys(data.raw_response[0]) : [],
+              firstItem: data.raw_response[0],
+            } : null,
+          });
+        } catch (e) {
+          // Fallback if logging fails
+          Logger.info('[Gateway] 🔍 Extracting score from response - Full structure analysis (fallback)', {
+            hasData: !!response.data,
+            responseKeys: Object.keys(response),
+            error: e.message,
+          });
+        }
+      } else {
+        // Lightweight logging (only essential info)
+        Logger.info('[Gateway] 🔍 Extracting score from response', {
+          hasData: !!response.data,
+          serviceType: response.service_type || response.serviceType || 'unknown',
+          dataKeys: response.data ? Object.keys(response.data).slice(0, 10) : [], // Limit keys
+          hasBiasScore: data.bias_score !== undefined,
+          hasPopupData: !!data.popup_data,
+          hasRawResponse: !!data.raw_response,
+        });
+      }
 
       // Derive a generic score for the UI from common guard fields.
       let score = null; // Use null to distinguish "not found" from "found but zero"
@@ -1224,14 +1360,35 @@ class AiGuardianGateway {
       let extractionPaths = [];
       
       if (serviceType === 'biasguard' || serviceType === 'bias_guard') {
-        // For BiasGuard, ONLY use bias_score (confidence is metadata, not the score)
+        // OPTIMIZED: Check popup_data.bias_score FIRST since backend always includes it for Chrome
+        // This is the most reliable source after backend fixes
+        const rawResponseBiasScore = Array.isArray(data.raw_response) && data.raw_response.length > 0 
+          ? data.raw_response[0]?.bias_score : null;
+        const rawResponseScore = Array.isArray(data.raw_response) && data.raw_response.length > 0 
+          ? data.raw_response[0]?.score : null;
+        
         extractionPaths = [
+          // Priority 1: popup_data.bias_score (backend always includes this for Chrome)
+          { value: data.popup_data?.bias_score, source: 'data.popup_data.bias_score' },
+          // Priority 2: Top-level bias_score (primary field)
           { value: data.bias_score, source: 'data.bias_score' },
+          // Priority 3: raw_response[0].bias_score (fallback)
+          { value: rawResponseBiasScore, source: 'raw_response[0].bias_score' },
+          // Priority 4: Other nested locations
           { value: data.result?.bias_score, source: 'data.result.bias_score' },
           { value: data.analysis?.bias_score, source: 'data.analysis.bias_score' },
+          { value: data.analysis?.score, source: 'data.analysis.score' },
           { value: response.bias_score, source: 'response.bias_score' },
-          // Generic fallbacks only if bias_score not found
+          // Priority 5: popup_data.score (fallback)
+          { value: data.popup_data?.score, source: 'data.popup_data.score' },
+          // Priority 6: content_script_data fields
+          { value: data.content_script_data?.bias_score, source: 'data.content_script_data.bias_score' },
+          { value: data.content_script_data?.score, source: 'data.content_script_data.score' },
+          // Priority 7: raw_response[0].score (fallback)
+          { value: rawResponseScore, source: 'raw_response[0].score' },
+          // Priority 8: Generic fallbacks
           { value: data.score, source: 'data.score' },
+          { value: data.confidence, source: 'data.confidence' },
           { value: response.score, source: 'response.score' },
         ];
       } else if (serviceType === 'trustguard' || serviceType === 'trust_guard') {
@@ -1265,6 +1422,13 @@ class AiGuardianGateway {
 
       // Try each extraction path
       for (const path of extractionPaths) {
+        // Special handling: Skip popup_data.confidence if it's 0 (0 might mean "no confidence" not "no bias")
+        // We'll check it in fallback logic with > 0 condition
+        if (path.source === 'data.popup_data.confidence' && path.value === 0) {
+          Logger.info(`[Gateway] Skipping ${path.source} (value is 0, might mean "no confidence" not "no bias")`);
+          continue;
+        }
+        
         const extracted = extractScore(path.value, path.source);
         if (extracted !== null) {
           score = extracted;
@@ -1274,47 +1438,50 @@ class AiGuardianGateway {
         }
       }
 
-      // FALLBACK: For BiasGuard, derive score from raw_response if bias_score not found
+      // FALLBACK: For BiasGuard, only check if score is still null after all extraction paths
       if (score === null && (serviceType === 'biasguard' || serviceType === 'bias_guard')) {
-        Logger.info('[Gateway] Attempting to derive bias_score from raw_response data');
+        Logger.warn('[Gateway] ⚠️ No bias_score found in any expected location for BiasGuard', {
+          attemptedPaths: extractionPaths.map(p => ({
+            path: p.source,
+            value: p.value,
+            type: typeof p.value,
+            isNull: p.value === null,
+            isUndefined: p.value === undefined,
+          })),
+          responseStructure: {
+            hasData: !!data,
+            dataKeys: data ? Object.keys(data) : [],
+            hasPopupData: !!data.popup_data,
+            popupDataKeys: data.popup_data ? Object.keys(data.popup_data) : [],
+            hasRawResponse: !!data.raw_response,
+            rawResponseLength: Array.isArray(data.raw_response) ? data.raw_response.length : 0,
+          },
+          note: 'Backend should always return bias_score. This may indicate a backend issue or response format change.',
+        });
         
-        // Check for raw_response array
+        // Only use is_poisoned fallback as last resort (for backward compatibility)
         const rawResponse = data.raw_response;
         if (Array.isArray(rawResponse) && rawResponse.length > 0) {
           const firstResult = rawResponse[0];
           
-          // If is_poisoned field exists, derive score from it
-          if (typeof firstResult.is_poisoned === 'boolean') {
+          // Check is_poisoned only if bias_score truly doesn't exist
+          if (typeof firstResult.is_poisoned === 'boolean' && firstResult.bias_score === undefined) {
+            Logger.warn('[Gateway] Using is_poisoned fallback (backward compatibility mode)', {
+              is_poisoned: firstResult.is_poisoned,
+              confidence: firstResult.confidence,
+              warning: 'Backend should return bias_score field. This fallback may be removed in future versions.',
+            });
+            
             if (firstResult.is_poisoned === false) {
-              // No bias detected → score is 0
               score = 0;
-              scoreSource = 'derived from raw_response[0].is_poisoned=false';
-              Logger.info('[Gateway] ✅ Derived bias_score=0 from is_poisoned=false');
+              scoreSource = 'derived from raw_response[0].is_poisoned=false (fallback)';
             } else if (firstResult.is_poisoned === true) {
-              // Bias detected → calculate score from confidence
-              // If confidence exists, use (1 - confidence) as bias score
-              // Higher confidence in "poisoned" = higher bias score
-              if (typeof firstResult.confidence === 'number' && !Number.isNaN(firstResult.confidence)) {
-                // Confidence is typically 0-1, where 1 = high confidence it's poisoned
-                // Bias score = confidence (since higher confidence in poisoning = higher bias)
-                score = Math.min(Math.max(firstResult.confidence, 0), 1); // Clamp to 0-1
-                scoreSource = 'derived from raw_response[0].is_poisoned=true, confidence';
-                Logger.info('[Gateway] ✅ Derived bias_score from is_poisoned=true and confidence:', score);
-              } else {
-                // Bias detected but no confidence → default to 0.5 (moderate bias)
-                score = 0.5;
-                scoreSource = 'derived from raw_response[0].is_poisoned=true (default)';
-                Logger.info('[Gateway] ✅ Derived bias_score=0.5 from is_poisoned=true (no confidence)');
-              }
+              const confidence = typeof firstResult.confidence === 'number' && !Number.isNaN(firstResult.confidence)
+                ? firstResult.confidence
+                : 0.5;
+              score = ScoreUtils.clampScore(confidence);
+              scoreSource = 'derived from raw_response[0].is_poisoned=true (fallback)';
             }
-          }
-          // Alternative: Check if confidence field exists and can be used
-          else if (typeof firstResult.confidence === 'number' && !Number.isNaN(firstResult.confidence)) {
-            // If confidence exists but is_poisoned doesn't, use confidence as bias score
-            // Note: This assumes confidence represents bias level (higher = more bias)
-            score = Math.min(Math.max(firstResult.confidence, 0), 1); // Clamp to 0-1
-            scoreSource = 'derived from raw_response[0].confidence';
-            Logger.info('[Gateway] ✅ Derived bias_score from confidence:', score);
           }
         }
       }
@@ -1340,14 +1507,11 @@ class AiGuardianGateway {
       // Final validation and clamping (only if score was found)
       if (score !== null) {
         if (typeof score === 'number' && !Number.isNaN(score)) {
-          // Clamp to 0-1 range
-          if (score < 0) {
-            Logger.warn('[Gateway] Score < 0, clamping to 0:', score);
-            score = 0;
-          }
-          if (score > 1) {
-            Logger.warn('[Gateway] Score > 1, clamping to 1:', score);
-            score = 1;
+          // Clamp to 0-1 range using ScoreUtils
+          const originalScore = score;
+          score = ScoreUtils.clampScore(score);
+          if (score !== originalScore) {
+            Logger.warn(`[Gateway] Score ${originalScore} clamped to ${score} (out of valid range [0, 1])`);
           }
         } else {
           Logger.warn('[Gateway] Score is not a valid number after extraction, setting to null', {
@@ -1361,14 +1525,44 @@ class AiGuardianGateway {
         }
       }
       
-      Logger.info('[Gateway] ✅ Final extracted score:', {
-        score: score,
+      // Comprehensive score extraction summary
+      Logger.info('[Gateway] 📊 Score Extraction Summary:', {
+        finalScore: score,
         scoreType: score === null ? 'null (missing)' : typeof score,
         percentage: score !== null ? Math.round(score * 100) + '%' : 'N/A',
         source: scoreSource,
         isZero: score === 0,
         isMissing: score === null,
         isZeroBecauseNotFound: false, // We no longer default to 0
+        extractionSummary: {
+          totalPathsChecked: extractionPaths.length,
+          attemptedPaths: extractionPaths.map(p => ({
+            path: p.source,
+            value: p.value,
+            type: typeof p.value,
+            wasChecked: true,
+            wasSkipped: p.source === 'data.popup_data.confidence' && p.value === 0,
+            extracted: extractScore(p.value, p.source),
+          })),
+          pathsThatHadValues: extractionPaths
+            .filter(p => p.value !== null && p.value !== undefined)
+            .map(p => ({ path: p.source, value: p.value, type: typeof p.value })),
+          pathsThatWereSkipped: extractionPaths
+            .filter(p => p.source === 'data.popup_data.confidence' && p.value === 0)
+            .map(p => ({ path: p.source, reason: 'value is 0, might mean "no confidence" not "no bias"' })),
+        },
+        fallbackInfo: score === null ? {
+          checkedRawResponse: Array.isArray(data.raw_response) && data.raw_response.length > 0,
+          rawResponseLength: Array.isArray(data.raw_response) ? data.raw_response.length : 0,
+          rawResponseFirstItemKeys: Array.isArray(data.raw_response) && data.raw_response[0] 
+            ? Object.keys(data.raw_response[0]) 
+            : [],
+        } : null,
+        diagnosticNote: score === 0 && scoreSource.includes('is_poisoned=false') 
+          ? 'Score is 0 because backend returned is_poisoned=false. If text is biased, backend may not be detecting bias correctly.'
+          : score === null
+          ? 'No score field found in backend response. Backend should return data.bias_score or similar field.'
+          : 'Score successfully extracted from backend response.',
       });
 
       transformedResponse = {
