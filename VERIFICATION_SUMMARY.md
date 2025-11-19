@@ -64,7 +64,10 @@ Backend API Response
 ## Code References
 
 ### Gateway Score Extraction
-```1185:1206:src/gateway.js
+
+src/gateway.js:1185-1206
+
+```javascript
 if (typeof data.bias_score === 'number') {
   score = data.bias_score; // BiasGuard
   scoreSource = 'data.bias_score';
@@ -85,7 +88,10 @@ if (typeof data.bias_score === 'number') {
 ```
 
 ### Content Script Display
-```227:237:src/content.js
+
+src/content.js:227-237
+
+```javascript
 const score = Math.round(response.score * 100);
 const analysis = response.analysis || {};
 
@@ -99,7 +105,10 @@ scoreSpan.textContent = 'Bias Score: ' + score + '%';
 ```
 
 ### Popup UI Update
-```1643:1660:src/popup.js
+
+src/popup.js:1643-1660
+
+```javascript
 if (biasScore && result.score !== undefined && typeof result.score === 'number') {
   if (result.score === 0 && (!result.analysis || Object.keys(result.analysis).length === 0)) {
     biasScore.textContent = 'N/A';

@@ -34,7 +34,10 @@ The backend returns responses in this format:
 6. ✅ Transforms response to UI-friendly format
 
 **Code Verification**:
-```1185:1206:src/gateway.js
+
+src/gateway.js:1185-1206
+
+```javascript
 if (typeof data.bias_score === 'number') {
   score = data.bias_score; // BiasGuard
   scoreSource = 'data.bias_score';
@@ -82,7 +85,10 @@ if (typeof data.bias_score === 'number') {
 5. ✅ Sends response to content script/popup
 
 **Code Verification**:
-```688:729:src/service-worker.js
+
+src/service-worker.js:688-729
+
+```javascript
 const analysisResult = await gateway.analyzeText(text);
 Logger.info('[BG] ✅ BACKEND RESULT RECEIVED IN SERVICE WORKER', {
   hasResult: !!analysisResult,
@@ -126,7 +132,10 @@ sendResponse(analysisResult);
 5. ✅ Highlights text with color-coded overlay
 
 **Code Verification**:
-```206:237:src/content.js
+
+src/content.js:206-237
+
+```javascript
 // DEBUG: Log score details before display using specialized biasScore logger
 Logger.biasScore('Score details before display', {
   rawScore: response.score,
@@ -175,7 +184,10 @@ scoreSpan.textContent = 'Bias Score: ' + score + '%';
 5. ✅ Displays bias type and confidence
 
 **Code Verification**:
-```1638:1661:src/popup.js
+
+src/popup.js:1638-1661
+
+```javascript
 const biasScore = document.getElementById('biasScore');
 const biasType = document.getElementById('biasType');
 const confidence = document.getElementById('confidence');
