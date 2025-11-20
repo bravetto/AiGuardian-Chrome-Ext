@@ -414,8 +414,8 @@
                   Logger.info('[Popup] ✅ Auth detected after auto-trigger!');
                   await updateAuthUI();
                 }
-              } catch (updateError) {
-                Logger.error('[Popup] Error updating UI after auth detection:', updateError);
+              } catch (err) {
+                Logger.error('[Popup] Failed to update auth UI after auto-trigger:', err);
               }
             }, 2000);
           } catch (autoTriggerErr) {
