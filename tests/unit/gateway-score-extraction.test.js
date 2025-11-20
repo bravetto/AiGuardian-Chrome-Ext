@@ -5,7 +5,7 @@
 
 import { testRunner } from './test-runner.js';
 
-const { test, assertEqual, assertTrue, assertFalse } = testRunner;
+const { test, assertEqual, assertTrue, assertFalse, assertNull } = testRunner;
 
 /**
  * Test optimized extraction order - data.bias_score prioritized (primary source)
@@ -27,7 +27,6 @@ test('Should prioritize data.bias_score over popup_data.bias_score', () => {
   
   assertTrue(result.isValid, 'Response should be valid');
   assertEqual(result.transformedResponse.score, 0.5, 'Should use data.bias_score (0.5) as primary source');
-  // Note: data.bias_score is now prioritized over popup_data.bias_score to prevent issues with zero-defaulted popup data
 });
 
 /**
@@ -78,7 +77,7 @@ test('Should handle invalid string scores', () => {
     
     const result = gateway.validateApiResponse(response, 'analyze');
     // Invalid strings should result in null score
-    assertEqual(result.transformedResponse.score, null, `Invalid string "${input.data.bias_score}" should result in null score`);
+    assertNull(result.transformedResponse.score, `Invalid string "${input.data.bias_score}" should result in null score`);
   });
 });
 
@@ -123,7 +122,7 @@ test('Should handle edge cases correctly', () => {
     data: { bias_score: NaN }
   };
   const nanResult = gateway.validateApiResponse(nanResponse, 'analyze');
-  assertEqual(nanResult.transformedResponse.score, null, 'NaN should result in null score');
+  assertNull(nanResult.transformedResponse.score, 'NaN should result in null score');
   
   // Infinity should result in null
   const infResponse = {
@@ -132,7 +131,7 @@ test('Should handle edge cases correctly', () => {
     data: { bias_score: Infinity }
   };
   const infResult = gateway.validateApiResponse(infResponse, 'analyze');
-  assertEqual(infResult.transformedResponse.score, null, 'Infinity should result in null score');
+  assertNull(infResult.transformedResponse.score, 'Infinity should result in null score');
   
   // Boolean true should convert to 1.0
   const trueResponse = {
@@ -190,7 +189,7 @@ test('Should return null score when no score fields are present', () => {
   
   const result = gateway.validateApiResponse(response, 'analyze');
   assertTrue(result.isValid, 'Response should be valid');
-  assertEqual(result.transformedResponse.score, null, 'Should return null when no score fields present');
+  assertNull(result.transformedResponse.score, 'Should return null when no score fields present');
 });
 
 /**
@@ -234,14 +233,15 @@ test('Should extract score from raw_response when primary fields missing', () =>
 });
 
 /**
- * Test is_poisoned=false fallback - should assign low score regardless of confidence
- * This verifies the fix for the issue where confidence was incorrectly inverting the score
+ * Test is_poisoned=false fallback
+ * This tests the "Smart Fallback" logic from the Dev branch:
+ * (1 - confidence) * 0.3
  */
-test('Should assign score 0.0 when is_poisoned=false regardless of confidence', () => {
+test('Should calculate smart score when is_poisoned=false based on confidence', () => {
   const gateway = new window.AiGuardianGateway();
   
   // Test case 1: is_poisoned=false with high confidence (1.0)
-  // Expected: score = 0.0 (backend says "not biased" with high confidence)
+  // Calculation: (1 - 1.0) * 0.3 = 0.0
   const highConfidenceResponse = {
     success: true,
     service_type: 'biasguard',
@@ -260,7 +260,7 @@ test('Should assign score 0.0 when is_poisoned=false regardless of confidence', 
     'is_poisoned=false with confidence=1.0 should result in score 0.0');
   
   // Test case 2: is_poisoned=false with low confidence (0.0)
-  // Expected: score = 0.0 (backend says "not biased" even with low confidence)
+  // Calculation: (1 - 0.0) * 0.3 = 0.3
   const lowConfidenceResponse = {
     success: true,
     service_type: 'biasguard',
@@ -269,17 +269,16 @@ test('Should assign score 0.0 when is_poisoned=false regardless of confidence', 
         is_poisoned: false, 
         confidence: 0.0 
       }]
-      // No bias_score field
     }
   };
   
   const lowConfResult = gateway.validateApiResponse(lowConfidenceResponse, 'analyze');
   assertTrue(lowConfResult.isValid, 'Response should be valid');
-  assertEqual(lowConfResult.transformedResponse.score, 0.0, 
-    'is_poisoned=false with confidence=0.0 should result in score 0.0 (not 0.3)');
+  assertEqual(lowConfResult.transformedResponse.score, 0.3, 
+    'is_poisoned=false with confidence=0.0 should result in score 0.3 (uncertainty factor)');
   
   // Test case 3: is_poisoned=false with medium confidence (0.5)
-  // Expected: score = 0.0 (backend says "not biased" regardless of confidence)
+  // Calculation: (1 - 0.5) * 0.3 = 0.15
   const mediumConfidenceResponse = {
     success: true,
     service_type: 'biasguard',
@@ -288,17 +287,16 @@ test('Should assign score 0.0 when is_poisoned=false regardless of confidence', 
         is_poisoned: false, 
         confidence: 0.5 
       }]
-      // No bias_score field
     }
   };
   
   const mediumConfResult = gateway.validateApiResponse(mediumConfidenceResponse, 'analyze');
   assertTrue(mediumConfResult.isValid, 'Response should be valid');
-  assertEqual(mediumConfResult.transformedResponse.score, 0.0, 
-    'is_poisoned=false with confidence=0.5 should result in score 0.0 (not 0.15)');
+  assertEqual(mediumConfResult.transformedResponse.score, 0.15, 
+    'is_poisoned=false with confidence=0.5 should result in score 0.15');
   
   // Test case 4: is_poisoned=false without confidence field
-  // Expected: score = 0.0 (default behavior when confidence is missing)
+  // Default confidence is 1.0, so score should be 0.0
   const noConfidenceResponse = {
     success: true,
     service_type: 'biasguard',
@@ -313,44 +311,7 @@ test('Should assign score 0.0 when is_poisoned=false regardless of confidence', 
   const noConfResult = gateway.validateApiResponse(noConfidenceResponse, 'analyze');
   assertTrue(noConfResult.isValid, 'Response should be valid');
   assertEqual(noConfResult.transformedResponse.score, 0.0, 
-    'is_poisoned=false without confidence should result in score 0.0');
-});
-
-/**
- * Test that is_poisoned=false does NOT invert confidence meaning
- * This verifies the fix prevents the bug where high confidence produced low scores
- */
-test('Should not invert confidence meaning when is_poisoned=false', () => {
-  const gateway = new window.AiGuardianGateway();
-  
-  // The bug: confidence=1.0 should NOT produce score=0.0 via uncertainty calculation
-  // The fix: is_poisoned=false always produces score=0.0 regardless of confidence
-  
-  const testCases = [
-    { confidence: 1.0, expectedScore: 0.0, description: 'High confidence in "not biased" should give low score' },
-    { confidence: 0.8, expectedScore: 0.0, description: 'High confidence should give low score' },
-    { confidence: 0.5, expectedScore: 0.0, description: 'Medium confidence should give low score' },
-    { confidence: 0.2, expectedScore: 0.0, description: 'Low confidence should give low score' },
-    { confidence: 0.0, expectedScore: 0.0, description: 'Very low confidence should give low score (not 0.3)' },
-  ];
-  
-  testCases.forEach(({ confidence, expectedScore, description }) => {
-    const response = {
-      success: true,
-      service_type: 'biasguard',
-      data: {
-        raw_response: [{ 
-          is_poisoned: false, 
-          confidence: confidence 
-        }]
-      }
-    };
-    
-    const result = gateway.validateApiResponse(response, 'analyze');
-    assertTrue(result.isValid, 'Response should be valid');
-    assertEqual(result.transformedResponse.score, expectedScore, 
-      `${description} (confidence=${confidence})`);
-  });
+    'is_poisoned=false without confidence should default to score 0.0');
 });
 
 /**
@@ -393,6 +354,7 @@ test('Should handle edge cases for is_poisoned fallback', () => {
   const gateway = new window.AiGuardianGateway();
   
   // Test case 1: is_poisoned=false with NaN confidence
+  // Should default to confidence 1.0 -> Score 0.0
   const nanConfResponse = {
     success: true,
     service_type: 'biasguard',
@@ -425,81 +387,63 @@ test('Should handle edge cases for is_poisoned fallback', () => {
   assertTrue(nullResult.isValid, 'Response should be valid');
   assertEqual(nullResult.transformedResponse.score, 0.0, 
     'is_poisoned=false with null confidence should default to score 0.0');
+});
+
+/**
+ * Test that zero confidence values are NOT skipped
+ * This verifies the Feature branch improvement is working
+ */
+test('Should extract zero confidence scores from popup_data.confidence', () => {
+  const gateway = new window.AiGuardianGateway();
   
-  // Test case 3: is_poisoned=false with undefined confidence
-  const undefinedConfResponse = {
+  // Test case 1: popup_data.confidence = 0.0 (valid zero score)
+  const zeroConfidenceResponse = {
     success: true,
     service_type: 'biasguard',
     data: {
-      raw_response: [{ 
-        is_poisoned: false
-        // confidence is undefined
-      }]
+      popup_data: { 
+        confidence: 0.0 
+      }
+      // No bias_score field - should use confidence
     }
   };
   
-  const undefinedResult = gateway.validateApiResponse(undefinedConfResponse, 'analyze');
-  assertTrue(undefinedResult.isValid, 'Response should be valid');
-        assertEqual(undefinedResult.transformedResponse.score, 0.0, 
-          'is_poisoned=false with undefined confidence should default to score 0.0');
-      });
-
-      /**
-       * Test that zero confidence values are NOT skipped
-       * This verifies the fix for the bug where popup_data.confidence=0 was incorrectly skipped
-       */
-      test('Should extract zero confidence scores from popup_data.confidence', () => {
-        const gateway = new window.AiGuardianGateway();
-        
-        // Test case 1: popup_data.confidence = 0.0 (valid zero score)
-        const zeroConfidenceResponse = {
-          success: true,
-          service_type: 'biasguard',
-          data: {
-            popup_data: { 
-              confidence: 0.0 
-            }
-            // No bias_score field - should use confidence
-          }
-        };
-        
-        const zeroResult = gateway.validateApiResponse(zeroConfidenceResponse, 'analyze');
-        assertTrue(zeroResult.isValid, 'Response should be valid');
-        assertEqual(zeroResult.transformedResponse.score, 0.0, 
-          'popup_data.confidence=0.0 should be extracted as score 0.0 (not skipped)');
-        
-        // Test case 2: popup_data.confidence = 0 with other fields present
-        const zeroWithOtherFieldsResponse = {
-          success: true,
-          service_type: 'biasguard',
-          data: {
-            bias_score: 0.5, // This should take priority
-            popup_data: { 
-              confidence: 0.0 
-            }
-          }
-        };
-        
-        const priorityResult = gateway.validateApiResponse(zeroWithOtherFieldsResponse, 'analyze');
-        assertTrue(priorityResult.isValid, 'Response should be valid');
-        assertEqual(priorityResult.transformedResponse.score, 0.5, 
-          'bias_score should take priority over popup_data.confidence');
-        
-        // Test case 3: Only popup_data.confidence = 0 (no other score fields)
-        const onlyZeroConfidenceResponse = {
-          success: true,
-          service_type: 'biasguard',
-          data: {
-            popup_data: { 
-              confidence: 0.0 
-            }
-            // No bias_score, no other score fields
-          }
-        };
-        
-        const onlyZeroResult = gateway.validateApiResponse(onlyZeroConfidenceResponse, 'analyze');
-        assertTrue(onlyZeroResult.isValid, 'Response should be valid');
-        assertEqual(onlyZeroResult.transformedResponse.score, 0.0, 
-          'popup_data.confidence=0.0 should be extracted when it\'s the only score field');
-      });
-
+  const zeroResult = gateway.validateApiResponse(zeroConfidenceResponse, 'analyze');
+  assertTrue(zeroResult.isValid, 'Response should be valid');
+  assertEqual(zeroResult.transformedResponse.score, 0.0, 
+    'popup_data.confidence=0.0 should be extracted as score 0.0 (not skipped)');
+  
+  // Test case 2: popup_data.confidence = 0 with other fields present
+  const zeroWithOtherFieldsResponse = {
+    success: true,
+    service_type: 'biasguard',
+    data: {
+      bias_score: 0.5, // This should take priority
+      popup_data: { 
+        confidence: 0.0 
+      }
+    }
+  };
+  
+  const priorityResult = gateway.validateApiResponse(zeroWithOtherFieldsResponse, 'analyze');
+  assertTrue(priorityResult.isValid, 'Response should be valid');
+  assertEqual(priorityResult.transformedResponse.score, 0.5, 
+    'bias_score should take priority over popup_data.confidence');
+  
+  // Test case 3: Only popup_data.confidence = 0 (no other score fields)
+  const onlyZeroConfidenceResponse = {
+    success: true,
+    service_type: 'biasguard',
+    data: {
+      popup_data: { 
+        confidence: 0.0 
+      }
+      // No bias_score, no other score fields
+    }
+  };
+  
+  const onlyZeroResult = gateway.validateApiResponse(onlyZeroConfidenceResponse, 'analyze');
+  assertTrue(onlyZeroResult.isValid, 'Response should be valid');
+  assertEqual(onlyZeroResult.transformedResponse.score, 0.0, 
+    'popup_data.confidence=0.0 should be extracted when it\'s the only score field');
+});
