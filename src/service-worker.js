@@ -454,6 +454,59 @@ try {
           handleClearSubscriptionCache(sendResponse);
           return true;
 
+        case 'INJECT_CLERK_BRIDGE':
+          // CRITICAL FIX: Inject bridge script into MAIN world using chrome.scripting API
+          // This is required in Manifest V3 to access page's window.Clerk
+          (async () => {
+            try {
+              if (typeof chrome.scripting === 'undefined' || !chrome.scripting.executeScript) {
+                Logger.error('[BG] chrome.scripting API not available');
+                sendResponse({ success: false, error: 'scripting API not available' });
+                return;
+              }
+
+              // Get the tab that sent the message
+              const tabId = sender.tab?.id;
+              if (!tabId) {
+                Logger.error('[BG] No tab ID available for bridge injection');
+                sendResponse({ success: false, error: 'No tab ID' });
+                return;
+              }
+
+              // Check if bridge is already injected to prevent duplicates
+              try {
+                const checkResults = await chrome.scripting.executeScript({
+                  target: { tabId: tabId },
+                  func: () => window.__aiGuardianBridgeLoaded,
+                  world: 'MAIN'
+                });
+                
+                if (checkResults[0]?.result) {
+                  Logger.info('[BG] Bridge already injected, skipping duplicate injection');
+                  sendResponse({ success: true, alreadyInjected: true });
+                  return;
+                }
+              } catch (checkError) {
+                // Check failed - continue with injection anyway
+                Logger.debug('[BG] Could not check bridge status, proceeding with injection:', checkError);
+              }
+
+              // Inject bridge script into MAIN world (page context)
+              await chrome.scripting.executeScript({
+                target: { tabId: tabId },
+                files: ['src/clerk-bridge.js'],
+                world: 'MAIN' // CRITICAL: Must be MAIN world to access window.Clerk
+              });
+
+              Logger.info('[BG] Successfully injected Clerk bridge into MAIN world');
+              sendResponse({ success: true });
+            } catch (error) {
+              Logger.error('[BG] Failed to inject bridge script:', error);
+              sendResponse({ success: false, error: error.message });
+            }
+          })();
+          return true; // Keep channel open for async response
+
         case 'GET_CLERK_KEY':
           // Get Clerk publishable key from storage, fallback to hardcoded default
           chrome.storage.sync.get(['clerk_publishable_key'], (data) => {

@@ -10,7 +10,8 @@
     "alarms",
     "contextMenus",
     "clipboardWrite",
-    "identity"
+    "identity",
+    "scripting"
   ],
   "host_permissions": [
     "<all_urls>"

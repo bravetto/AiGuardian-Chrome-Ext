@@ -214,12 +214,16 @@
       return;
     }
 
-    // Validate score is a number
-    if (typeof response.score !== 'number' || Number.isNaN(response.score)) {
-      Logger.warn('[CS] ⚠️ Analysis response has invalid score type:', {
+    // Validate score is a number AND in valid range (0-1)
+    if (typeof response.score !== 'number' || 
+        Number.isNaN(response.score) ||
+        response.score < 0 || 
+        response.score > 1) {
+      Logger.warn('[CS] ⚠️ Analysis response has invalid score:', {
         score: response.score,
         scoreType: typeof response.score,
         isNaN: Number.isNaN(response.score),
+        isOutOfRange: response.score < 0 || response.score > 1,
       });
       showErrorBadge('Score unavailable - Analysis incomplete. Invalid score format.', 'warning');
       return;
@@ -245,14 +249,37 @@
     });
 
     // TRACER BULLET: Highlight the text on the page (only if score is a valid number)
+    // CRITICAL FIX: Convert score (0-1) to percentage (0-100) for getScoreColor()
     if (range && typeof response.score === 'number' && !Number.isNaN(response.score)) {
-      highlightSelection(range, response.score);
+      const scorePercentage = Math.round(response.score * 100);
+      highlightSelection(range, scorePercentage);
     }
 
     // Convert score to percentage (0-100)
     // Note: score of 0 is valid (backend explicitly returned 0, meaning no bias detected)
     const score = Math.round(response.score * 100);
     const analysis = response.analysis || {};
+
+    // EPISTEMIC CERTAINTY VALIDATION: Validate 97.8% threshold
+    const confidence = analysis.confidence;
+    const epistemicThreshold = 0.978; // 97.8% epistemic certainty threshold
+    
+    if (confidence !== undefined && confidence !== null && typeof confidence === 'number') {
+      if (confidence < epistemicThreshold) {
+        Logger.warn('[CS] ⚠️ Confidence below epistemic threshold (97.8%):', {
+          confidence: Math.round(confidence * 100) + '%',
+          threshold: '97.8%',
+          difference: Math.round((epistemicThreshold - confidence) * 100) + '%',
+          score: score + '%'
+        });
+      } else {
+        Logger.info('[CS] ✅ Confidence meets epistemic threshold:', {
+          confidence: Math.round(confidence * 100) + '%',
+          threshold: '97.8%',
+          score: score + '%'
+        });
+      }
+    }
 
     // Create enhanced badge with more information
     const badge = document.createElement('div');
@@ -279,6 +306,14 @@
       typeDiv.style.cssText = 'font-size: 10px; margin-top: 4px;';
       typeDiv.textContent = `Type: ${analysis.bias_type}`;
       badge.appendChild(typeDiv);
+    }
+
+    // EPISTEMIC CERTAINTY WARNING: Show warning if confidence below 97.8%
+    if (confidence !== undefined && confidence !== null && typeof confidence === 'number' && confidence < epistemicThreshold) {
+      const warningDiv = document.createElement('div');
+      warningDiv.style.cssText = 'font-size: 10px; margin-top: 4px; color: #FF9800; font-weight: 600;';
+      warningDiv.textContent = `⚠️ Low confidence (${Math.round(confidence * 100)}%)`;
+      badge.appendChild(warningDiv);
     }
 
     badge.style.cssText = `
@@ -980,48 +1015,125 @@
     readyState: document.readyState,
   });
 
-  if (isClerkPage) {
-    Logger.info('[CS] Content script running on Clerk page:', window.location.hostname);
-    
-    // Listen for messages from the bridge script
-    window.addEventListener('message', (event) => {
-      // We only accept messages from ourselves
-      if (event.source !== window) return;
-      
-      if (event.data.type === 'AI_GUARDIAN_CLERK_DATA' && event.data.payload) {
-        const { user, token } = event.data.payload;
-        Logger.info('[CS] Received Clerk data from bridge script', user.id);
-        
-        if (user && !userDetected) {
-          userDetected = true;
-          
-          chrome.runtime.sendMessage(
-            {
-              type: 'CLERK_AUTH_DETECTED',
-              user: user,
-              token: token,
-            },
-            (response) => {
-               if (!chrome.runtime.lastError) {
-                  Logger.info('[CS] Successfully sent bridge auth to extension');
-               }
-            }
-          );
+  // Reset userDetected flag on page navigation
+  window.addEventListener('beforeunload', () => {
+    userDetected = false;
+    Logger.info('[CS] Page unloading - resetting userDetected flag');
+  });
+
+  // Listen for storage changes to reset flag on logout
+  if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged) {
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+      if (areaName === 'local' && changes.clerk_user) {
+        // User logged out - reset detection flag
+        if (!changes.clerk_user.newValue && changes.clerk_user.oldValue) {
+          userDetected = false;
+          Logger.info('[CS] User logged out - resetting userDetected flag');
         }
       }
     });
+  }
 
-    function injectClerkBridge() {
+  if (isClerkPage) {
+    Logger.info('[CS] Content script running on Clerk page:', window.location.hostname);
+    
+    // CRITICAL: Set up listener BEFORE injecting bridge to avoid race condition
+    // Listen for messages from the bridge script
+    window.addEventListener('message', (event) => {
+      // Validate message source and structure
+      if (event.source !== window) {
+        return;
+      }
+      if (event.data?.type !== 'AI_GUARDIAN_CLERK_DATA') {
+        return;
+      }
+      if (!event.data?.payload) {
+        return;
+      }
+      
+      // Security: Validate message signature
+      if (event.data._signature !== 'aiGuardianBridge') {
+        Logger.warn('[CS] Invalid message signature - ignoring');
+        return;
+      }
+      
+      // Validate payload structure
+      if (!event.data.payload.user || !event.data.payload.user.id) {
+        Logger.warn('[CS] Invalid payload structure - ignoring');
+        return;
+      }
+      
+      const { user, token } = event.data.payload;
+      Logger.info('[CS] Received Clerk data from bridge script', user.id);
+      
+      if (user && !userDetected) {
+        userDetected = true;
+        
+        chrome.runtime.sendMessage(
+          {
+            type: 'CLERK_AUTH_DETECTED',
+            user: user,
+            token: token,
+          },
+          (response) => {
+             if (!chrome.runtime.lastError) {
+                Logger.info('[CS] Successfully sent bridge auth to extension');
+             }
+          }
+        );
+      }
+    });
+
+    async function injectClerkBridge() {
       try {
-        const script = document.createElement('script');
-        script.src = chrome.runtime.getURL('src/clerk-bridge.js');
-        script.onload = function() {
-          this.remove(); // Clean up script tag
-        };
-        (document.head || document.documentElement).appendChild(script);
-        Logger.info('[CS] Injected Clerk bridge script');
+        // CRITICAL FIX: Inject bridge script into MAIN world (page context)
+        // Content scripts run in isolated world and cannot access page's window.Clerk
+        // We need to inject an inline script that runs in MAIN world
+        
+        // Method 1: Use chrome.scripting.executeScript from service worker (preferred)
+        // Request service worker to inject the script
+        chrome.runtime.sendMessage({ 
+          type: 'INJECT_CLERK_BRIDGE',
+          url: window.location.href 
+        }, (response) => {
+          if (chrome.runtime.lastError) {
+            Logger.warn('[CS] Service worker injection failed, using inline method:', chrome.runtime.lastError);
+            // Fallback: Inject inline script that loads bridge in MAIN world
+            injectInlineBridge();
+          } else {
+            Logger.info('[CS] Bridge injection requested from service worker');
+          }
+        });
       } catch (e) {
         Logger.error('[CS] Failed to inject bridge script:', e);
+        // Fallback to inline injection
+        injectInlineBridge();
+      }
+    }
+
+    // Fallback: Inject inline script that runs in MAIN world
+    function injectInlineBridge() {
+      try {
+        // Create inline script that loads the bridge script
+        // This script runs in MAIN world context
+        const bridgeUrl = chrome.runtime.getURL('src/clerk-bridge.js');
+        const inlineScript = document.createElement('script');
+        // Use JSON.stringify for proper URL escaping
+        inlineScript.textContent = `
+          (function() {
+            if (window.__aiGuardianBridgeLoaded) return;
+            const script = document.createElement('script');
+            script.src = ${JSON.stringify(bridgeUrl)};
+            script.onload = function() { this.remove(); };
+            (document.head || document.documentElement).appendChild(script);
+          })();
+        `;
+        // Inject into page's document (not content script's isolated context)
+        (document.head || document.documentElement).appendChild(inlineScript);
+        inlineScript.remove(); // Clean up
+        Logger.info('[CS] Injected bridge script via inline method (MAIN world)');
+      } catch (e) {
+        Logger.error('[CS] Inline injection failed:', e);
       }
     }
 
