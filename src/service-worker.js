@@ -153,8 +153,13 @@ try {
       }
 
       if (Object.keys(settingsToSave).length > 0) {
-        chrome.storage.sync.set(settingsToSave);
-        Logger.info('[BG] Initialized default settings');
+        chrome.storage.sync.set(settingsToSave, () => {
+          if (chrome.runtime.lastError) {
+            Logger.error('[BG] Failed to initialize default settings:', chrome.runtime.lastError.message);
+          } else {
+            Logger.info('[BG] Initialized default settings');
+          }
+        });
       }
     });
   }
@@ -237,6 +242,10 @@ try {
             chrome.tabs.sendMessage(tab.id, {
               type: 'SHOW_ANALYSIS_RESULT',
               payload: response,
+            }, () => {
+              if (chrome.runtime.lastError) {
+                Logger.warn('[BG] Failed to send analysis result to content script:', chrome.runtime.lastError.message);
+              }
             });
           });
         }
@@ -252,13 +261,22 @@ try {
 
       case 'copy-analysis':
         chrome.storage.local.get(['last_analysis'], (data) => {
+          if (chrome.runtime.lastError) {
+            Logger.error('[BG] Failed to read last_analysis:', chrome.runtime.lastError.message);
+            return;
+          }
           if (data.last_analysis) {
             const analysisText = JSON.stringify(data.last_analysis, null, 2);
             chrome.tabs.sendMessage(tab.id, {
               type: 'COPY_TO_CLIPBOARD',
               payload: analysisText,
+            }, () => {
+              if (chrome.runtime.lastError) {
+                Logger.warn('[BG] Failed to send copy command to content script:', chrome.runtime.lastError.message);
+              } else {
+                Logger.info('[BG] Analysis copied to clipboard');
+              }
             });
-            Logger.info('[BG] Analysis copied to clipboard');
           }
         });
         break;
@@ -266,8 +284,13 @@ try {
       case 'clear-highlights':
         chrome.tabs.sendMessage(tab.id, {
           type: 'CLEAR_HIGHLIGHTS',
+        }, () => {
+          if (chrome.runtime.lastError) {
+            Logger.warn('[BG] Failed to send clear highlights command:', chrome.runtime.lastError.message);
+          } else {
+            Logger.info('[BG] Highlights cleared');
+          }
         });
-        Logger.info('[BG] Highlights cleared');
         break;
     }
   });
@@ -282,22 +305,37 @@ try {
           case 'analyze-selection':
             chrome.tabs.sendMessage(tabs[0].id, {
               type: 'ANALYZE_SELECTION_COMMAND',
+            }, () => {
+              if (chrome.runtime.lastError) {
+                Logger.warn('[BG] Failed to send analyze command:', chrome.runtime.lastError.message);
+              } else {
+                Logger.info('[BG] Analyze selection command triggered');
+              }
             });
-            Logger.info('[BG] Analyze selection command triggered');
             break;
 
           case 'clear-highlights':
             chrome.tabs.sendMessage(tabs[0].id, {
               type: 'CLEAR_HIGHLIGHTS',
+            }, () => {
+              if (chrome.runtime.lastError) {
+                Logger.warn('[BG] Failed to send clear highlights command:', chrome.runtime.lastError.message);
+              } else {
+                Logger.info('[BG] Clear highlights command triggered');
+              }
             });
-            Logger.info('[BG] Clear highlights command triggered');
             break;
 
           case 'show-history':
             chrome.tabs.sendMessage(tabs[0].id, {
               type: 'SHOW_HISTORY',
+            }, () => {
+              if (chrome.runtime.lastError) {
+                Logger.warn('[BG] Failed to send show history command:', chrome.runtime.lastError.message);
+              } else {
+                Logger.info('[BG] Show history command triggered');
+              }
             });
-            Logger.info('[BG] Show history command triggered');
             break;
         }
       }
@@ -1508,6 +1546,7 @@ try {
       }
       
       // Initialize calibration system
+      // eslint-disable-next-line no-undef
       const calibrator = new BiasGuardEpistemicCalibration();
       
       // Run calibration

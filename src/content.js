@@ -475,8 +475,12 @@
     // Remove any existing modal
     const existingModal = document.querySelector('.aiguardian-analysis-modal');
     const existingOverlay = document.querySelector('.aiguardian-modal-overlay');
-    if (existingModal) existingModal.remove();
-    if (existingOverlay) existingOverlay.remove();
+    if (existingModal) {
+      existingModal.remove();
+    }
+    if (existingOverlay) {
+      existingOverlay.remove();
+    }
 
     // DEBUG: Log response structure to diagnose score extraction
     Logger.info('[CS] Modal - Full response structure:', {
@@ -746,7 +750,7 @@
       issuesLabel.style.cssText = 'font-size: 12px; font-weight: 600; color: #F44336; margin-bottom: 12px; text-transform: uppercase;';
       issuesSection.appendChild(issuesLabel);
 
-      issues.forEach((issue, idx) => {
+      issues.forEach((issue, _idx) => {
         const issueDiv = document.createElement('div');
         issueDiv.style.cssText = `
           padding: 12px;
@@ -771,7 +775,7 @@
       recLabel.style.cssText = 'font-size: 12px; font-weight: 600; color: #4CAF50; margin-bottom: 12px; text-transform: uppercase;';
       recSection.appendChild(recLabel);
 
-      recommendations.forEach((rec, idx) => {
+      recommendations.forEach((rec, _idx) => {
         const recDiv = document.createElement('div');
         recDiv.style.cssText = `
           padding: 12px;
@@ -992,6 +996,39 @@
     return null;
   }
 
+  /**
+   * Helper function to retrieve Clerk session token
+   * Returns null if token cannot be retrieved (non-fatal)
+   * @param {Object} clerk - Clerk SDK instance
+   * @returns {Promise<string|null>} Clerk session token or null
+   */
+  async function getClerkToken(clerk) {
+    if (!clerk) {
+      return null;
+    }
+    
+    try {
+      // Ensure Clerk is loaded
+      if (typeof clerk.load === 'function' && !clerk.loaded) {
+        await clerk.load();
+      }
+      
+      // Get session
+      const session = await clerk.session;
+      if (session) {
+        const token = await session.getToken();
+        if (token) {
+          Logger.info('[CS] Successfully retrieved Clerk token');
+          return token;
+        }
+      }
+    } catch (e) {
+      Logger.warn('[CS] Could not get token from Clerk (non-fatal):', e.message);
+    }
+    
+    return null;
+  }
+
   // Detect Clerk authentication on accounts.dev pages
   // When Clerk redirects to /default-redirect, extract session info
   // Check if we're on a Clerk account page OR the AiGuardian landing page
@@ -1121,7 +1158,9 @@
         // Use JSON.stringify for proper URL escaping
         inlineScript.textContent = `
           (function() {
-            if (window.__aiGuardianBridgeLoaded) return;
+            if (window.__aiGuardianBridgeLoaded) {
+              return;
+            }
             const script = document.createElement('script');
             script.src = ${JSON.stringify(bridgeUrl)};
             script.onload = function() { this.remove(); };
@@ -1482,6 +1521,10 @@
 
                         // Also verify storage was updated
                         chrome.storage.local.get(['clerk_user'], (result) => {
+                          if (chrome.runtime.lastError) {
+                            Logger.warn('[CS] Failed to verify storage update:', chrome.runtime.lastError.message);
+                            return;
+                          }
                           if (result.clerk_user) {
                             Logger.info(
                               '[CS] ✅ Verified user stored in extension:',
@@ -1634,35 +1677,6 @@
     let attempts = 0;
     const maxAttempts = 20; // Increased from 10 to handle slow SDK loading
     const attemptInterval = 1500; // 1.5 seconds between attempts
-
-    /**
-     * Helper function to retrieve Clerk session token
-     * Returns null if token cannot be retrieved (non-fatal)
-     */
-    async function getClerkToken(clerk) {
-      if (!clerk) return null;
-      
-      try {
-        // Ensure Clerk is loaded
-        if (typeof clerk.load === 'function' && !clerk.loaded) {
-          await clerk.load();
-        }
-        
-        // Get session
-        const session = await clerk.session;
-        if (session) {
-          const token = await session.getToken();
-          if (token) {
-            Logger.info('[CS] Successfully retrieved Clerk token');
-            return token;
-          }
-        }
-      } catch (e) {
-        Logger.warn('[CS] Could not get token from Clerk (non-fatal):', e.message);
-      }
-      
-      return null;
-    }
 
     /**
      * Try to detect Clerk session from cookies as fallback
@@ -2277,6 +2291,11 @@
    */
   function showAnalysisHistory() {
     chrome.storage.sync.get(['analysis_history'], (data) => {
+      if (chrome.runtime.lastError) {
+        Logger.error('[CS] Failed to load analysis history:', chrome.runtime.lastError.message);
+        showErrorBadge('Failed to load history. Please try again.', 'error');
+        return;
+      }
       const history = data.analysis_history || [];
 
       if (history.length === 0) {

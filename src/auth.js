@@ -24,7 +24,9 @@ class AiGuardianAuth {
    */
   async isInternalServer() {
     const gatewayUrl = await this.getGatewayUrl();
-    if (!gatewayUrl) return false;
+    if (!gatewayUrl) {
+      return false;
+    }
     try {
       const url = new URL(gatewayUrl);
       const hostname = url.hostname.toLowerCase();
@@ -1116,8 +1118,15 @@ class AiGuardianAuth {
    * Store Clerk token in extension storage
    */
   async storeToken(token) {
-    return new Promise((resolve) => {
-      chrome.storage.local.set({ clerk_token: token }, resolve);
+    return new Promise((resolve, reject) => {
+      chrome.storage.local.set({ clerk_token: token }, () => {
+        if (chrome.runtime.lastError) {
+          Logger.error('[Auth] Failed to store token:', chrome.runtime.lastError.message);
+          reject(new Error(chrome.runtime.lastError.message));
+        } else {
+          resolve();
+        }
+      });
     });
   }
 
@@ -1238,13 +1247,20 @@ class AiGuardianAuth {
           dataToStore.clerk_token = token;
         }
 
-        return new Promise((resolve) => {
-          chrome.storage.local.set(dataToStore, resolve);
+        return new Promise((resolve, reject) => {
+          chrome.storage.local.set(dataToStore, () => {
+            if (chrome.runtime.lastError) {
+              Logger.error('[Auth] Failed to store auth data:', chrome.runtime.lastError.message);
+              reject(new Error(chrome.runtime.lastError.message));
+            } else {
+              resolve();
+            }
+          });
         });
       });
     } else {
       // Fallback to direct storage if MutexHelper not available
-      return new Promise((resolve) => {
+      return new Promise((resolve, reject) => {
         const dataToStore = {
           clerk_user: {
             id: user.id,
@@ -1261,7 +1277,14 @@ class AiGuardianAuth {
           dataToStore.clerk_token = token;
         }
 
-        chrome.storage.local.set(dataToStore, resolve);
+        chrome.storage.local.set(dataToStore, () => {
+          if (chrome.runtime.lastError) {
+            Logger.error('[Auth] Failed to store auth data:', chrome.runtime.lastError.message);
+            reject(new Error(chrome.runtime.lastError.message));
+          } else {
+            resolve();
+          }
+        });
       });
     }
   }

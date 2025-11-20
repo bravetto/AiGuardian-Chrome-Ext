@@ -99,6 +99,7 @@ const gatewayContent = fs.readFileSync(gatewayPath, 'utf8');
 const gatewayScript = gatewayContent + '\nglobal.AiGuardianGateway = AiGuardianGateway;';
 
 // Eval everything
+// eslint-disable-next-line no-eval
 eval(constantsContent + '\n' + gatewayScript);
 
 // TEST SUITE
@@ -195,7 +196,9 @@ async function runVerification() {
     const scoreStatusBadge = document.getElementById('scoreStatusBadge');
     const biasType = document.getElementById('biasType');
 
-    if (!biasScore) return;
+    if (!biasScore) {
+      return;
+    }
 
     // Reset classes
     biasScore.className = 'score-value';
@@ -211,13 +214,19 @@ async function runVerification() {
         
         if (result.score < 0.3) {
           biasScore.className += ' low';
-          if (biasType) biasType.textContent = 'Safe content';
+          if (biasType) {
+            biasType.textContent = 'Safe content';
+          }
         } else if (result.score < 0.7) {
           biasScore.className += ' medium';
-          if (biasType) biasType.textContent = 'Potential bias detected';
+          if (biasType) {
+            biasType.textContent = 'Potential bias detected';
+          }
         } else {
           biasScore.className += ' high';
-          if (biasType) biasType.textContent = 'High bias detected';
+          if (biasType) {
+            biasType.textContent = 'High bias detected';
+          }
         }
         
         scoreStatusBadge.className += ' connected';
@@ -254,7 +263,9 @@ async function runVerification() {
         passed = false;
     }
     
-    if (passed) console.log('  ✅ UI Updated Correctly');
+    if (passed) {
+      console.log('  ✅ UI Updated Correctly');
+    }
     console.log('');
   }
 
