@@ -1305,45 +1305,50 @@
    * Load last analysis from storage and display it in popup
    */
   async function loadLastAnalysis() {
-    try {
-      chrome.storage.local.get(['last_analysis'], (data) => {
-        if (chrome.runtime.lastError) {
-          Logger.warn('[Popup] Failed to load last analysis:', chrome.runtime.lastError);
-          return;
-        }
-
-        const lastAnalysis = data.last_analysis;
-        if (lastAnalysis && lastAnalysis.success !== false && lastAnalysis.score !== undefined) {
-          Logger.info('[Popup] ✅ Loading last analysis from storage - score update:', {
-            score: lastAnalysis.score,
-            success: lastAnalysis.success,
-            timestamp: lastAnalysis.timestamp,
-            hasSummary: !!lastAnalysis.summary,
-            note: 'This score will be displayed in popup UI',
-          });
-
-          // Convert minimalAnalysis format to full result format for updateAnalysisResult
-          const result = {
-            success: true,
-            score: lastAnalysis.score,
-            analysis: lastAnalysis.summary ? { summary: lastAnalysis.summary } : {},
-            timestamp: lastAnalysis.timestamp,
-          };
-
-          // Show analysis section if it's hidden
-          const analysisSection = document.getElementById('analysisSection');
-          if (analysisSection) {
-            analysisSection.style.display = 'block';
+    return new Promise((resolve, reject) => {
+      try {
+        chrome.storage.local.get(['last_analysis'], (data) => {
+          if (chrome.runtime.lastError) {
+            Logger.warn('[Popup] Failed to load last analysis:', chrome.runtime.lastError);
+            resolve(); // Resolve instead of return to allow await to complete
+            return;
           }
 
-          updateAnalysisResult(result);
-        } else {
-          Logger.debug('[Popup] No valid last analysis found in storage');
-        }
-      });
-    } catch (err) {
-      Logger.error('[Popup] Error loading last analysis:', err);
-    }
+          const lastAnalysis = data.last_analysis;
+          if (lastAnalysis && lastAnalysis.success !== false && lastAnalysis.score !== undefined) {
+            Logger.info('[Popup] ✅ Loading last analysis from storage - score update:', {
+              score: lastAnalysis.score,
+              success: lastAnalysis.success,
+              timestamp: lastAnalysis.timestamp,
+              hasSummary: !!lastAnalysis.summary,
+              note: 'This score will be displayed in popup UI',
+            });
+
+            // Convert minimalAnalysis format to full result format for updateAnalysisResult
+            const result = {
+              success: true,
+              score: lastAnalysis.score,
+              analysis: lastAnalysis.summary ? { summary: lastAnalysis.summary } : {},
+              timestamp: lastAnalysis.timestamp,
+            };
+
+            // Show analysis section if it's hidden
+            const analysisSection = document.getElementById('analysisSection');
+            if (analysisSection) {
+              analysisSection.style.display = 'block';
+            }
+
+            updateAnalysisResult(result);
+          } else {
+            Logger.debug('[Popup] No valid last analysis found in storage');
+          }
+          resolve(); // Resolve the promise after callback completes
+        });
+      } catch (err) {
+        Logger.error('[Popup] Error loading last analysis:', err);
+        reject(err); // Reject on synchronous errors
+      }
+    });
   }
 
   /**
