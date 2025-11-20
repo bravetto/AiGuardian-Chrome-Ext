@@ -492,6 +492,31 @@ try {
           handleClearSubscriptionCache(sendResponse);
           return true;
 
+        case 'E2E_TEST_STORAGE_GET':
+          // E2E TEST: Bridge for storage access from webpage console
+          // Allows test script to access extension storage via message passing
+          (async () => {
+            try {
+              const keys = request.keys || [];
+              const area = request.area || 'local';
+              const storageArea = area === 'sync' ? chrome.storage.sync : chrome.storage.local;
+
+              storageArea.get(keys, (data) => {
+                if (chrome.runtime.lastError) {
+                  Logger.error('[BG] E2E test storage get error:', chrome.runtime.lastError);
+                  sendResponse({ success: false, error: chrome.runtime.lastError.message });
+                  return;
+                }
+                Logger.info('[BG] E2E test storage get success:', { keys, area, hasData: !!data });
+                sendResponse({ success: true, data: data });
+              });
+            } catch (error) {
+              Logger.error('[BG] E2E test storage get exception:', error);
+              sendResponse({ success: false, error: error.message });
+            }
+          })();
+          return true; // Keep message channel open for async response
+
         case 'INJECT_CLERK_BRIDGE':
           // CRITICAL FIX: Inject bridge script into MAIN world using chrome.scripting API
           // This is required in Manifest V3 to access page's window.Clerk
@@ -814,14 +839,24 @@ try {
             // Save as last analysis for copy feature - store only essential data to avoid quota issues
             try {
               // Store minimal data to avoid quota exceeded errors
+              // Store minimal data to avoid quota exceeded errors
+              // Ensure success flag is explicitly set (handles undefined case)
               const minimalAnalysis = {
                 score: analysisResult.score,
                 timestamp: new Date().toISOString(),
                 summary: analysisResult.analysis?.popup_data?.summary || 
                          analysisResult.analysis?.summary || 
                          'Analysis complete',
-                success: analysisResult.success
+                // Explicitly set success: true for successful analyses (undefined treated as success)
+                success: analysisResult.success !== false ? true : false
               };
+              
+              Logger.info('[BG] Prepared minimalAnalysis for storage:', {
+                score: minimalAnalysis.score,
+                hasSummary: !!minimalAnalysis.summary,
+                success: minimalAnalysis.success,
+                timestamp: minimalAnalysis.timestamp,
+              });
               
               // Log size before storing
               const minimalAnalysisSize = JSON.stringify(minimalAnalysis).length;
@@ -853,9 +888,13 @@ try {
                           isQuotaError: chrome.runtime.lastError.message.includes('quota') || chrome.runtime.lastError.message.includes('QUOTA'),
                         });
                       } else {
-                        Logger.info('[BG] Successfully stored last_analysis:', {
+                        Logger.info('[BG] ✅ Successfully stored last_analysis - score update will trigger popup refresh:', {
+                          score: minimalAnalysis.score,
+                          success: minimalAnalysis.success,
+                          timestamp: minimalAnalysis.timestamp,
                           minimalAnalysisSize,
                           minimalAnalysisSizeKB: (minimalAnalysisSize / 1024).toFixed(2),
+                          note: 'Storage change event will notify popup to update UI',
                         });
                       }
                     });
@@ -874,6 +913,12 @@ try {
                         minimalAnalysisSize,
                         minimalAnalysisSizeKB: (minimalAnalysisSize / 1024).toFixed(2),
                         isQuotaError: chrome.runtime.lastError.message.includes('quota') || chrome.runtime.lastError.message.includes('QUOTA'),
+                      });
+                    } else {
+                      Logger.info('[BG] ✅ Successfully stored last_analysis (fallback after quota check error):', {
+                        score: minimalAnalysis.score,
+                        success: minimalAnalysis.success,
+                        timestamp: minimalAnalysis.timestamp,
                       });
                     }
                   });
@@ -898,9 +943,13 @@ try {
                       });
                     }
                   } else {
-                    Logger.info('[BG] Successfully stored last_analysis (fallback):', {
+                    Logger.info('[BG] ✅ Successfully stored last_analysis (fallback) - score update will trigger popup refresh:', {
+                      score: minimalAnalysis.score,
+                      success: minimalAnalysis.success,
+                      timestamp: minimalAnalysis.timestamp,
                       minimalAnalysisSize,
                       minimalAnalysisSizeKB: (minimalAnalysisSize / 1024).toFixed(2),
+                      note: 'Storage change event will notify popup to update UI',
                     });
                   }
                 });

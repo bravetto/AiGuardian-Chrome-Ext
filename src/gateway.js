@@ -1232,6 +1232,19 @@ class AiGuardianGateway {
         },
 
         /**
+         * Convert score (0-1) to percentage (0-100)
+         * @param {number} score - Score value (0-1)
+         * @returns {number} Percentage (0-100)
+         */
+        scoreToPercentage(score) {
+          if (score === null || score === undefined || Number.isNaN(score)) {
+            return null;
+          }
+          const clamped = this.clampScore(score);
+          return Math.round(clamped * 100);
+        },
+
+        /**
          * Normalize a score value (clamp and validate)
          * @param {*} value - Value to normalize
          * @param {string} source - Source path for logging
@@ -1481,17 +1494,27 @@ class AiGuardianGateway {
             
             if (firstResult.is_poisoned === false) {
               // When is_poisoned=false, backend determined text is NOT biased
-              // Assign a low score to reflect the backend's explicit "not biased" determination
-              // We trust the backend's determination regardless of confidence value
-              score = 0.0; // Backend says "not biased" - assign low score
+              // Smart fallback: Use confidence to reflect uncertainty in "not biased" determination
+              // Formula: (1 - confidence) * 0.3
+              // Rationale: Low confidence in "not biased" determination suggests uncertainty,
+              // so higher score reflects that uncertainty (e.g., confidence=0.0 → score=0.3)
+              // High confidence (1.0) means backend is certain it's not biased → score=0.0
+              const confidence = typeof firstResult.confidence === 'number' && !Number.isNaN(firstResult.confidence)
+                ? firstResult.confidence
+                : 1.0; // Default to 1.0 if missing/invalid (high confidence = not biased)
+              score = ScoreUtils.clampScore((1 - confidence) * 0.3);
               scoreSource = 'derived from raw_response[0].is_poisoned=false (fallback)';
               
               Logger.info('[Gateway] Calculated score from is_poisoned=false:', {
                 is_poisoned: firstResult.is_poisoned,
-                confidence: firstResult.confidence,
+                rawConfidence: firstResult.confidence,
+                usedConfidence: confidence,
+                formula: '(1 - confidence) * 0.3',
                 calculatedScore: score,
-                scorePercentage: (score * 100).toFixed(1) + '%',
-                note: 'Backend determined "not biased" - assigning low score regardless of confidence'
+                scorePercentage: ScoreUtils.scoreToPercentage(score) !== null 
+                  ? ScoreUtils.scoreToPercentage(score) + '%' 
+                  : 'N/A',
+                note: 'Smart fallback: Low confidence in "not biased" determination suggests uncertainty'
               });
             } else if (firstResult.is_poisoned === true) {
               const confidence = typeof firstResult.confidence === 'number' && !Number.isNaN(firstResult.confidence)
