@@ -151,7 +151,7 @@
    */
   function displayAnalysisResults(response, range) {
     // DEBUG: Log full response structure to diagnose score extraction
-    Logger.info('[CS] 🔍 Displaying analysis results - Full response structure:', {
+    Logger.info('[CS] 🔍 Displaying analysis results - Score update flow:', {
       hasResponse: !!response,
       success: response?.success,
       hasScore: response?.score !== undefined,
@@ -159,8 +159,7 @@
       scoreType: typeof response?.score,
       hasAnalysis: !!response?.analysis,
       analysisKeys: response?.analysis ? Object.keys(response?.analysis) : [],
-      analysisPreview: response?.analysis ? JSON.stringify(response?.analysis).substring(0, 300) : 'null',
-      fullResponsePreview: JSON.stringify(response).substring(0, 500)
+      note: 'Content script displaying score immediately - popup will update via storage listener',
     });
     
     // Check for error responses first - don't display "Score: 0%" for failed analyses

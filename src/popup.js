@@ -55,17 +55,59 @@
         await loadSystemStatus();
         await loadGuardServices();
         await loadSubscriptionStatus();
+        // Load last analysis score on initialization
+        await loadLastAnalysis();
       } catch (err) {
         Logger.error('Status loading failed (non-critical)', err);
       }
 
-      // Set up storage listener for auth state changes
+      // Set up unified storage listener for auth state and analysis updates
       chrome.storage.onChanged.addListener((changes, areaName) => {
-        if (areaName === 'local' && (changes.clerk_user || changes.clerk_token)) {
-          Logger.info('[Popup] Auth state changed in storage, refreshing UI...');
-          updateAuthUI().catch((err) => {
-            Logger.error('[Popup] Failed to update auth UI after storage change:', err);
-          });
+        if (areaName === 'local') {
+          // Handle auth state changes
+          if (changes.clerk_user || changes.clerk_token) {
+            Logger.info('[Popup] Auth state changed in storage, refreshing UI...');
+            updateAuthUI().catch((err) => {
+              Logger.error('[Popup] Failed to update auth UI after storage change:', err);
+            });
+          }
+          
+          // Handle last_analysis changes to update popup automatically
+          if (changes.last_analysis) {
+            Logger.info('[Popup] Last analysis changed in storage, updating UI...', {
+              hasNewValue: !!changes.last_analysis.newValue,
+              hasOldValue: !!changes.last_analysis.oldValue,
+              newScore: changes.last_analysis.newValue?.score,
+              newSuccess: changes.last_analysis.newValue?.success,
+            });
+            
+            const newAnalysis = changes.last_analysis.newValue;
+            // Check if analysis is valid: has score and success !== false (handles undefined as success)
+            if (newAnalysis && 
+                newAnalysis.score !== undefined && 
+                newAnalysis.score !== null &&
+                newAnalysis.success !== false) {
+              // Convert minimalAnalysis format to full result format for updateAnalysisResult
+              const result = {
+                success: true, // Always true if we got here (success !== false)
+                score: newAnalysis.score,
+                analysis: newAnalysis.summary ? { summary: newAnalysis.summary } : {},
+                timestamp: newAnalysis.timestamp,
+              };
+              Logger.info('[Popup] Updating analysis result from storage:', {
+                score: result.score,
+                hasSummary: !!result.analysis.summary,
+                timestamp: result.timestamp,
+              });
+              updateAnalysisResult(result);
+            } else {
+              Logger.debug('[Popup] Skipping invalid or failed analysis update:', {
+                hasAnalysis: !!newAnalysis,
+                score: newAnalysis?.score,
+                success: newAnalysis?.success,
+              });
+            }
+          }
         }
       });
 
@@ -528,38 +570,9 @@
         Logger.warn('[Popup] Chrome runtime API not available - message listener not registered');
       }
 
-      // Listen for storage changes (e.g., when auth is detected by content script)
-      if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged) {
-        chrome.storage.onChanged.addListener((changes, areaName) => {
-          if (areaName === 'local' && changes.clerk_user) {
-            Logger.info('[Popup] 🔔 Clerk user storage changed!', {
-              oldValue: changes.clerk_user.oldValue ? 'had user' : 'no user',
-              newValue: changes.clerk_user.newValue ? 'has user' : 'no user',
-              userId: changes.clerk_user.newValue?.id,
-            });
-            Logger.info('[Popup] Storage changed', { clerk_user: changes.clerk_user });
-
-            // Immediately update UI from storage without waiting for auth object sync
-            // This ensures UI updates as soon as user signs in on landing page
-            Logger.info('[Popup] Immediately updating UI from storage change');
-            updateAuthUI();
-
-            // Stop periodic checking if we're now authenticated
-            if (changes.clerk_user.newValue && authCheckInterval) {
-              clearInterval(authCheckInterval);
-              authCheckInterval = null;
-              Logger.info('[Popup] Stopped periodic auth check - user authenticated');
-            }
-
-            // Also sync with auth object in background (non-blocking)
-            if (auth) {
-              auth.checkUserSession().catch((err) => {
-                Logger.warn('[Popup] Background auth sync failed (non-critical):', err);
-              });
-            }
-          }
-        });
-      }
+      // NOTE: Storage listener for auth changes is now handled in main initialization (line 65)
+      // to avoid duplicate listeners. This ensures single unified listener for all storage changes.
+      // The listener at line 65 handles both auth changes and last_analysis updates.
     } catch (err) {
       Logger.error('Auth initialization error', err);
       if (errorHandler) {
@@ -1285,6 +1298,51 @@
         gateway_connected: false,
         error: err.message || 'Failed to load status',
       });
+    }
+  }
+
+  /**
+   * Load last analysis from storage and display it in popup
+   */
+  async function loadLastAnalysis() {
+    try {
+      chrome.storage.local.get(['last_analysis'], (data) => {
+        if (chrome.runtime.lastError) {
+          Logger.warn('[Popup] Failed to load last analysis:', chrome.runtime.lastError);
+          return;
+        }
+
+        const lastAnalysis = data.last_analysis;
+        if (lastAnalysis && lastAnalysis.success !== false && lastAnalysis.score !== undefined) {
+          Logger.info('[Popup] ✅ Loading last analysis from storage - score update:', {
+            score: lastAnalysis.score,
+            success: lastAnalysis.success,
+            timestamp: lastAnalysis.timestamp,
+            hasSummary: !!lastAnalysis.summary,
+            note: 'This score will be displayed in popup UI',
+          });
+
+          // Convert minimalAnalysis format to full result format for updateAnalysisResult
+          const result = {
+            success: true,
+            score: lastAnalysis.score,
+            analysis: lastAnalysis.summary ? { summary: lastAnalysis.summary } : {},
+            timestamp: lastAnalysis.timestamp,
+          };
+
+          // Show analysis section if it's hidden
+          const analysisSection = document.getElementById('analysisSection');
+          if (analysisSection) {
+            analysisSection.style.display = 'block';
+          }
+
+          updateAnalysisResult(result);
+        } else {
+          Logger.debug('[Popup] No valid last analysis found in storage');
+        }
+      });
+    } catch (err) {
+      Logger.error('[Popup] Error loading last analysis:', err);
     }
   }
 
@@ -2085,8 +2143,23 @@
         }
         
         if (analysisStatusLine) {
-          const timestamp = new Date().toLocaleTimeString();
-          analysisStatusLine.textContent = `Last analysis: ${timestamp}`;
+          // Use stored timestamp if available, otherwise use current time
+          let timestampText;
+          if (result.timestamp) {
+            try {
+              const storedDate = new Date(result.timestamp);
+              if (!isNaN(storedDate.getTime())) {
+                timestampText = storedDate.toLocaleTimeString();
+              } else {
+                timestampText = new Date().toLocaleTimeString();
+              }
+            } catch (e) {
+              timestampText = new Date().toLocaleTimeString();
+            }
+          } else {
+            timestampText = new Date().toLocaleTimeString();
+          }
+          analysisStatusLine.textContent = `Last analysis: ${timestampText}`;
           analysisStatusLine.style.color = 'rgba(249, 249, 249, 0.75)';
         }
       }
