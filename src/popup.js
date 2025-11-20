@@ -403,15 +403,19 @@
             
             // Wait a moment for content scripts to respond, then check storage again
             setTimeout(async () => {
-              const recheck = await new Promise((resolve) => {
-                chrome.storage.local.get(['clerk_user', 'clerk_token'], (data) => {
-                  resolve(data);
+              try {
+                const recheck = await new Promise((resolve) => {
+                  chrome.storage.local.get(['clerk_user', 'clerk_token'], (data) => {
+                    resolve(data);
+                  });
                 });
-              });
-              
-              if (recheck.clerk_user) {
-                Logger.info('[Popup] ✅ Auth detected after auto-trigger!');
-                await updateAuthUI();
+                
+                if (recheck.clerk_user) {
+                  Logger.info('[Popup] ✅ Auth detected after auto-trigger!');
+                  await updateAuthUI();
+                }
+              } catch (updateError) {
+                Logger.error('[Popup] Error updating UI after auth detection:', updateError);
               }
             }, 2000);
           } catch (autoTriggerErr) {
