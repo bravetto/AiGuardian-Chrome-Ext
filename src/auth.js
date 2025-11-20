@@ -20,8 +20,30 @@ class AiGuardianAuth {
   }
 
   /**
+   * Check if gateway URL is an internal server (for testing)
+   */
+  async isInternalServer() {
+    const gatewayUrl = await this.getGatewayUrl();
+    if (!gatewayUrl) return false;
+    try {
+      const url = new URL(gatewayUrl);
+      const hostname = url.hostname.toLowerCase();
+      return hostname === 'localhost' || 
+             hostname === '127.0.0.1' || 
+             hostname.startsWith('192.168.') ||
+             hostname.startsWith('10.') ||
+             hostname.startsWith('internal') ||
+             hostname.includes('.internal') ||
+             hostname.includes('.local');
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /**
    * Initialize Clerk authentication
    * Automatically fetches Clerk key from backend - no user configuration needed
+   * On internal servers, auto-triggers sign-in for testing
    */
   async initialize() {
     try {
@@ -119,9 +141,33 @@ class AiGuardianAuth {
       try {
         await this.checkUserSession();
         Logger.info('[Auth] User session check completed');
+        
+        // Auto-trigger sign-in on internal servers for testing
+        if (!this.isAuthenticated()) {
+          const isInternal = await this.isInternalServer();
+          if (isInternal) {
+            Logger.info('[Auth] Internal server detected - auto-triggering Clerk sign-in for testing');
+            setTimeout(() => {
+              this.signIn().catch(err => {
+                Logger.warn('[Auth] Auto sign-in failed:', err.message);
+              });
+            }, 1000);
+          }
+        }
       } catch (sessionError) {
         // Don't fail initialization if user session check fails - user might not be signed in yet
         Logger.warn('[Auth] User session check failed (non-critical):', sessionError.message);
+        
+        // Still try auto sign-in on internal servers
+        const isInternal = await this.isInternalServer();
+        if (isInternal) {
+          Logger.info('[Auth] Auto-triggering sign-in on internal server after session check failure');
+          setTimeout(() => {
+            this.signIn().catch(err => {
+              Logger.warn('[Auth] Auto sign-in failed:', err.message);
+            });
+          }, 1000);
+        }
       }
 
       return true;
@@ -1170,27 +1216,54 @@ class AiGuardianAuth {
 
   /**
    * Store authentication state in extension storage
+   * EPISTEMIC: Uses mutex protection to prevent race conditions
    */
   async storeAuthState(user, token = null) {
-    return new Promise((resolve) => {
-      const dataToStore = {
-        clerk_user: {
-          id: user.id,
-          email: user.primaryEmailAddress?.emailAddress || user.emailAddresses?.[0]?.emailAddress,
-          firstName: user.firstName,
-          lastName: user.lastName,
-          username: user.username,
-          imageUrl: user.imageUrl || user.profileImageUrl,
-        },
-      };
+    // Use mutex if available to prevent race conditions
+    if (typeof MutexHelper !== 'undefined') {
+      return await MutexHelper.withLock('auth_state_update', async () => {
+        const dataToStore = {
+          clerk_user: {
+            id: user.id,
+            email: user.primaryEmailAddress?.emailAddress || user.emailAddresses?.[0]?.emailAddress,
+            firstName: user.firstName,
+            lastName: user.lastName,
+            username: user.username,
+            imageUrl: user.imageUrl || user.profileImageUrl,
+          },
+        };
 
-      // Store token if available
-      if (token) {
-        dataToStore.clerk_token = token;
-      }
+        // Store token if available
+        if (token) {
+          dataToStore.clerk_token = token;
+        }
 
-      chrome.storage.local.set(dataToStore, resolve);
-    });
+        return new Promise((resolve) => {
+          chrome.storage.local.set(dataToStore, resolve);
+        });
+      });
+    } else {
+      // Fallback to direct storage if MutexHelper not available
+      return new Promise((resolve) => {
+        const dataToStore = {
+          clerk_user: {
+            id: user.id,
+            email: user.primaryEmailAddress?.emailAddress || user.emailAddresses?.[0]?.emailAddress,
+            firstName: user.firstName,
+            lastName: user.lastName,
+            username: user.username,
+            imageUrl: user.imageUrl || user.profileImageUrl,
+          },
+        };
+
+        // Store token if available
+        if (token) {
+          dataToStore.clerk_token = token;
+        }
+
+        chrome.storage.local.set(dataToStore, resolve);
+      });
+    }
   }
 }
 

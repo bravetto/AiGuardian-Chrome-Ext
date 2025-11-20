@@ -383,6 +383,40 @@
             await auth.checkUserSession();
             await updateAuthUI();
           }
+        } else {
+          // No auth found - automatically trigger auth detection on all tabs
+          Logger.info('[Popup] No auth found - auto-triggering auth detection on all tabs');
+          try {
+            const tabs = await chrome.tabs.query({});
+            let checkedTabs = 0;
+            
+            for (const tab of tabs) {
+              try {
+                await chrome.tabs.sendMessage(tab.id, { type: 'FORCE_CHECK_AUTH' });
+                checkedTabs++;
+              } catch (e) {
+                // Tab might not have content script (expected for chrome:// pages)
+              }
+            }
+            
+            Logger.info(`[Popup] Auto-triggered auth detection on ${checkedTabs} tabs`);
+            
+            // Wait a moment for content scripts to respond, then check storage again
+            setTimeout(async () => {
+              const recheck = await new Promise((resolve) => {
+                chrome.storage.local.get(['clerk_user', 'clerk_token'], (data) => {
+                  resolve(data);
+                });
+              });
+              
+              if (recheck.clerk_user) {
+                Logger.info('[Popup] ✅ Auth detected after auto-trigger!');
+                await updateAuthUI();
+              }
+            }, 2000);
+          } catch (autoTriggerErr) {
+            Logger.warn('[Popup] Auto-trigger auth detection failed (non-critical):', autoTriggerErr);
+          }
         }
       }
 
@@ -779,6 +813,12 @@
       // Show auth buttons
       userProfile.style.display = 'none';
       authButtons.style.display = 'flex';
+      
+      // Show refresh auth button when not authenticated
+      const refreshAuthBtn = document.getElementById('refreshAuthBtn');
+      if (refreshAuthBtn) {
+        refreshAuthBtn.style.display = 'inline-block';
+      }
 
       // Show main content (contains status section and guard services - should be visible to all)
       // Only hide analysis section when not authenticated
@@ -787,6 +827,14 @@
       }
       if (analysisSection) {
         analysisSection.style.display = 'none';
+      }
+    }
+    
+    // Hide refresh auth button when authenticated
+    if (isAuth) {
+      const refreshAuthBtn = document.getElementById('refreshAuthBtn');
+      if (refreshAuthBtn) {
+        refreshAuthBtn.style.display = 'none';
       }
     }
   }
@@ -1024,6 +1072,57 @@
       Logger.warn('[Popup] signOutBtn not found in DOM (may be hidden)');
     }
 
+    // Refresh Auth button - trigger auth detection on all tabs
+    const refreshAuthBtn = document.getElementById('refreshAuthBtn');
+    if (refreshAuthBtn) {
+      const clickHandler = async () => {
+        try {
+          Logger.info('[Popup] Refresh Auth button clicked - triggering auth detection on all tabs');
+          refreshAuthBtn.disabled = true;
+          refreshAuthBtn.textContent = '🔄 Checking...';
+          
+          // Send FORCE_CHECK_AUTH message to all tabs
+          const tabs = await chrome.tabs.query({});
+          let checkedTabs = 0;
+          
+          for (const tab of tabs) {
+            try {
+              await chrome.tabs.sendMessage(tab.id, { type: 'FORCE_CHECK_AUTH' });
+              checkedTabs++;
+            } catch (e) {
+              // Tab might not have content script (e.g., chrome:// pages)
+              // This is expected and not an error
+            }
+          }
+          
+          Logger.info(`[Popup] Sent FORCE_CHECK_AUTH to ${checkedTabs} tabs`);
+          
+          // Wait a moment for content scripts to respond
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          
+          // Refresh auth state
+          await initializeAuth();
+          await updateAuthUI();
+          
+          refreshAuthBtn.textContent = '🔄 Refresh Auth';
+          refreshAuthBtn.disabled = false;
+          
+          showSuccess('✅ Auth state refreshed. Please check again.');
+        } catch (err) {
+          Logger.error('[Popup] Failed to refresh auth', err);
+          refreshAuthBtn.textContent = '🔄 Refresh Auth';
+          refreshAuthBtn.disabled = false;
+          showFallbackError('Failed to refresh auth. Please try again.');
+        }
+      };
+
+      refreshAuthBtn.addEventListener('click', clickHandler);
+      eventListeners.push({ element: refreshAuthBtn, event: 'click', handler: clickHandler });
+      Logger.info('[Popup] Refresh Auth button listener attached');
+    } else {
+      Logger.warn('[Popup] refreshAuthBtn not found in DOM');
+    }
+
     // Status button - show diagnostic panel
     const toggleStatusBtn = document.getElementById('toggleStatusBtn');
     if (toggleStatusBtn) {
@@ -1104,6 +1203,24 @@
     if (refreshDiagnosticBtn) {
       const clickHandler = async () => {
         Logger.info('[Popup] Refresh diagnostic button clicked');
+        
+        // Also trigger auth detection when refreshing diagnostics
+        try {
+          const tabs = await chrome.tabs.query({});
+          for (const tab of tabs) {
+            try {
+              await chrome.tabs.sendMessage(tab.id, { type: 'FORCE_CHECK_AUTH' });
+            } catch (e) {
+              // Tab might not have content script (expected)
+            }
+          }
+          Logger.info('[Popup] Triggered auth detection on all tabs during diagnostic refresh');
+          
+          // Wait a moment for responses
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        } catch (authTriggerErr) {
+          Logger.warn('[Popup] Failed to trigger auth detection during diagnostic refresh:', authTriggerErr);
+        }
         try {
           await runDiagnostics();
           Logger.info('[Popup] Diagnostics refresh completed');
