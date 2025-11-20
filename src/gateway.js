@@ -1390,10 +1390,10 @@ class AiGuardianGateway {
           ? data.raw_response[0]?.score : null;
         
         extractionPaths = [
-          // Priority 1: Top-level bias_score (primary field - most reliable source)
-          { value: data.bias_score, source: 'data.bias_score' },
-          // Priority 2: popup_data.bias_score (backend always includes this for Chrome)
+          // Priority 1: popup_data.bias_score (backend always includes this for Chrome - HIGHEST PRIORITY)
           { value: data.popup_data?.bias_score, source: 'data.popup_data.bias_score' },
+          // Priority 2: Top-level bias_score (primary field - reliable source)
+          { value: data.bias_score, source: 'data.bias_score' },
           // Priority 3: raw_response[0].bias_score (fallback)
           { value: rawResponseBiasScore, source: 'raw_response[0].bias_score' },
           // Priority 4: Other nested locations

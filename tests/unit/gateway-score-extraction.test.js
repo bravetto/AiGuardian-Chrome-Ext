@@ -8,9 +8,9 @@ import { testRunner } from './test-runner.js';
 const { test, assertEqual, assertTrue, assertFalse, assertNull } = testRunner;
 
 /**
- * Test optimized extraction order - data.bias_score prioritized (primary source)
+ * Test optimized extraction order - popup_data.bias_score prioritized (highest priority)
  */
-test('Should prioritize data.bias_score over popup_data.bias_score', () => {
+test('Should prioritize popup_data.bias_score over data.bias_score', () => {
   const gateway = new window.AiGuardianGateway();
   
   const response = {
@@ -26,7 +26,7 @@ test('Should prioritize data.bias_score over popup_data.bias_score', () => {
   const result = gateway.validateApiResponse(response, 'analyze');
   
   assertTrue(result.isValid, 'Response should be valid');
-  assertEqual(result.transformedResponse.score, 0.5, 'Should use data.bias_score (0.5) as primary source');
+  assertEqual(result.transformedResponse.score, 0.75, 'Should use popup_data.bias_score (0.75) as highest priority source');
 });
 
 /**
