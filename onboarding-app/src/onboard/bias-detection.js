@@ -497,11 +497,11 @@ class OnboardBiasDetection {
     // Weighted average (KISS: Simple 60/40 split)
     const confidence = (patternStrength * 0.6) + (validationCertainty * 0.4);
     
-    // Ensure minimum 98.7% for validated detections
+    // Ensure minimum 98.7% for validated detections above threshold
     const EPISTEMIC_THRESHOLD = 0.987;
-    if (biasAnalysis.detected_types?.length > 0 && confidence < EPISTEMIC_THRESHOLD) {
-      // Boost confidence for validated pattern matches
-      return Math.min(0.99, confidence + 0.05);
+    if (biasScore > 0.05 && biasAnalysis.detected_types?.length > 0 && confidence < EPISTEMIC_THRESHOLD) {
+      // Set minimum confidence for validated bias detections
+      return EPISTEMIC_THRESHOLD;
     }
     
     return Math.min(0.99, Math.max(0.5, confidence));
