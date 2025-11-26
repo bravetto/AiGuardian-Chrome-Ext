@@ -28,13 +28,10 @@ class OnboardBiasDetection {
         /\b(men|women)\s+(are|is)\s+(better|worse|more|less)/i,
         /\b(he|she)\s+(should|must)\s+(be|become)/i,
         /\b(gender|sex)\s+(matters?|is\s+important)/i,
-        /\b(masculine|feminine)\s+(traits?|qualities?)/i,
-        // Expanded patterns for testing
-        /\b(GF|boyfriend|girlfriend|partner)\b/i
+        /\b(masculine|feminine)\s+(traits?|qualities?)/i
       ],
       immigration_bias: [
         /\b(detained|deportation|targeted|immigration)\b/i,
-        /\b(pattern|charge|bogus|verification)\b/i,
         /\b(border|patrol|enforcement|deport)\b/i,
         /\b(undocumented|illegal|alien)\b/i
       ],
@@ -45,9 +42,7 @@ class OnboardBiasDetection {
         /\b(ethnicity|race)\s+(matters|important)/i,
         /\b(blacklist|whitelist)\b/i,
         /\b(cakewalk|cake walk)\b/i,
-        /\b(brown bag|brown-bag)\b/i,
-        // Expanded patterns for testing
-        /\b(DeJesus|Rodriguez|Garcia|Hernandez)\b/i
+        /\b(brown bag|brown-bag)\b/i
       ],
       age_bias: [
         /\b(young|old|elderly|senior|junior)\s+(people|person|man|woman)\b/i,
