@@ -743,16 +743,16 @@ try {
       // BUT if authentication is required, we must check it first
       const useEmbeddedModel = typeof FEATURE_FLAGS !== 'undefined' && FEATURE_FLAGS.USE_EMBEDDED_MODEL;
       const requireAuth = typeof FEATURE_FLAGS !== 'undefined' && FEATURE_FLAGS.BACKEND_AUTH_ENABLED;
-      
-      // Hybrid Cost-Saving Strategy with ML Model:
-      // 1. Prioritize ML Model (Local, Most Accurate) - offline processing
+
+      // Hybrid Cost-Saving Strategy with ML Model (Enhanced):
+      // 1. Prioritize ML Model (Local, Most Accurate) - offline processing, cost-saving
       // 2. Fall back to Regex-based detection if ML model unavailable
       // 3. Fall back to Backend only if both local methods fail (AND embedded mode is NOT forced)
       const useMLModel = typeof MLBiasDetection !== 'undefined' && typeof tf !== 'undefined';
       useOnboard = typeof OnboardBiasDetection !== 'undefined';
-      
+
       Logger.info('[BG] 🔄 Analysis Strategy:', {
-        strategy: useEmbeddedModel ? 'Embedded First (Local ML)' : 'Hybrid (ML First)',
+        strategy: useEmbeddedModel ? 'Embedded First (Local ML)' : 'Hybrid Cost-Saving (ML First)',
         useEmbeddedModel: useEmbeddedModel,
         requireAuth: requireAuth,
         useMLModel: useMLModel,
@@ -790,7 +790,7 @@ try {
           });
           return;
         }
-        
+
         Logger.info('[BG] ✅ Access granted');
       } else if (typeof TranscendentAccessControl !== 'undefined') {
         // If auth not required but class available, check anyway for logging
@@ -903,23 +903,25 @@ try {
           Logger.warn('[BG] ML detection failed, falling back to regex:', mlError);
           // Fall through to regex-based detection
         }
+      } else {
+        Logger.warn('[BG] ⚠️ TranscendentAccessControl class not available');
       }
 
-      // Use regex-based onboard detection as fallback
-      Logger.info('[BG] 🔍 Checking regex-based onboard availability:', {
+      // Use onboard detection as cost-saving fallback to ML
+      Logger.info('[BG] 🔍 Checking onboard availability (cost-saving fallback):', {
         useOnboard: useOnboard,
         OnboardBiasDetectionAvailable: typeof OnboardBiasDetection !== 'undefined',
         textLength: text?.length || 0
       });
 
       if (useOnboard && typeof OnboardBiasDetection !== 'undefined') {
-        Logger.info('[BG] 🚀 Starting regex-based onboard detection...');
+        Logger.info('[BG] 🚀 Starting onboard detection (cost-saving fallback)...');
         try {
           Logger.info('[BG] 📝 Creating OnboardBiasDetection instance...');
           const onboardDetector = new OnboardBiasDetection();
           Logger.info('[BG] ✅ OnboardBiasDetection instance created');
           
-          Logger.info('[BG] 📊 Running regex bias detection on text...');
+          Logger.info('[BG] 📊 Running bias detection on text (cost-saving mode)...');
           const onboardResult = onboardDetector.detectBias(text);
           Logger.info('[BG] ✅ Bias detection completed:', {
             success: onboardResult?.success,
@@ -1055,7 +1057,7 @@ try {
       }
 
       // If forced embedded mode, stop here (unless we want to allow backend fallback even then?)
-      // With hybrid approach, we might want to allow backend fallback if ML fails, 
+      // With hybrid approach, we might want to allow backend fallback if ML fails,
       // but for "Embedded Mode" we strictly stick to local.
       if (useEmbeddedModel) {
         Logger.info('[BG] 🛑 Embedded mode active - skipping backend fallback');
