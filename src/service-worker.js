@@ -720,27 +720,66 @@ try {
       let useOnboard = false;
       let accessControl = null;
       
+      // Hybrid Cost-Saving Strategy:
+      // 1. Prioritize Onboard Mode (Local) to save backend costs and latency
+      // 2. Fall back to Backend only if Onboard fails or isn't available
+      useOnboard = typeof OnboardBiasDetection !== 'undefined';
+      
+      Logger.info('[BG] 🔄 Hybrid Mode Active:', {
+        strategy: 'Local First (Cost Saving)',
+        useOnboard: useOnboard,
+        modulesAvailable: {
+            OnboardBiasDetection: typeof OnboardBiasDetection !== 'undefined',
+            TranscendentAccessControl: typeof TranscendentAccessControl !== 'undefined',
+            TranscendenceCalculator: typeof TranscendenceCalculator !== 'undefined'
+        }
+      });
+
+      // Still check access control for logging purposes
       if (typeof TranscendentAccessControl !== 'undefined') {
+        Logger.info('[BG] 🔍 TranscendentAccessControl class is available');
         accessControl = new TranscendentAccessControl();
         const accessCheck = await accessControl.checkTranscendentAccess();
-        
+
+        Logger.info('[BG] 🔍 Access check result:', {
+          hasAccess: accessCheck.hasAccess,
+          reason: accessCheck.reason,
+          message: accessCheck.message,
+          transcendent: accessCheck.transcendent,
+          allKeys: Object.keys(accessCheck)
+        });
+
         if (accessCheck.hasAccess && accessCheck.transcendent) {
-          useOnboard = true;
-          Logger.info('[BG] ✨ Transcendent mode enabled - using onboard detection');
+          Logger.info('[BG] ✨ Transcendent access also available');
         } else {
-          Logger.info('[BG] Backend mode - access check:', {
-            hasAccess: accessCheck.hasAccess,
-            reason: accessCheck.reason,
-            message: accessCheck.message
-          });
+          Logger.info('[BG] 📝 Backend access not available, using onboard mode');
         }
+      } else {
+        Logger.warn('[BG] ⚠️ TranscendentAccessControl class not available');
       }
 
       // Use onboard detection if available and user has access
+      Logger.info('[BG] 🔍 Checking onboard availability:', {
+        useOnboard: useOnboard,
+        OnboardBiasDetectionAvailable: typeof OnboardBiasDetection !== 'undefined',
+        textLength: text?.length || 0
+      });
+
       if (useOnboard && typeof OnboardBiasDetection !== 'undefined') {
+        Logger.info('[BG] 🚀 Starting onboard detection...');
         try {
+          Logger.info('[BG] 📝 Creating OnboardBiasDetection instance...');
           const onboardDetector = new OnboardBiasDetection();
+          Logger.info('[BG] ✅ OnboardBiasDetection instance created');
+          
+          Logger.info('[BG] 📊 Running bias detection on text...');
           const onboardResult = onboardDetector.detectBias(text);
+          Logger.info('[BG] ✅ Bias detection completed:', {
+            success: onboardResult?.success,
+            bias_score: onboardResult?.bias_score,
+            bias_types: onboardResult?.bias_types,
+            confidence: onboardResult?.confidence
+          });
           
           // Calculate transcendence if available
           let transcendenceData = null;
@@ -778,6 +817,22 @@ try {
           
           // Save to history
           await saveToHistory(text, analysisResult);
+
+          Logger.info('[BG] 📤 Sending onboard result to content script...', {
+            hasResult: !!analysisResult,
+            resultKeys: Object.keys(analysisResult),
+            success: analysisResult.success,
+            score: analysisResult.score
+          });
+
+          try {
+            sendResponse(analysisResult);
+            Logger.info('[BG] ✅ Successfully sent onboard result');
+          } catch (sendError) {
+            Logger.error('[BG] ❌ Failed to send onboard result:', sendError);
+          }
+
+          // Store last analysis in background after response is sent
           chrome.storage.local.set({
             last_analysis: {
               score: analysisResult.score,
@@ -787,13 +842,68 @@ try {
               transcendent: true,
               transcendence_level: transcendenceData?.level
             }
+          }, () => {
+             if (chrome.runtime.lastError) {
+               Logger.warn('[BG] Error storing last_analysis (non-critical):', chrome.runtime.lastError);
+             } else {
+               Logger.info('[BG] ✅ Stored last_analysis in local storage');
+             }
           });
           
-          sendResponse(analysisResult);
           return;
         } catch (onboardError) {
           Logger.warn('[BG] Onboard detection failed, falling back to backend:', onboardError);
           // Fall through to backend
+        }
+
+        // If onboard mode was attempted but failed, try again with forced onboard
+        if (!useOnboard && typeof OnboardBiasDetection !== 'undefined') {
+          Logger.info('[BG] 🔄 Forcing onboard mode as last resort...');
+          try {
+            const onboardDetector = new OnboardBiasDetection();
+            const onboardResult = onboardDetector.detectBias(text);
+
+            const analysisResult = {
+              success: true,
+              score: onboardResult.bias_score,
+              analysis: {
+                bias_types: onboardResult.bias_types,
+                bias_details: onboardResult.bias_details,
+                mitigation_suggestions: onboardResult.mitigation_suggestions,
+                fairness_score: onboardResult.fairness_score,
+                summary: onboardResult.bias_types.length > 0
+                  ? `Detected ${onboardResult.bias_types.join(', ')} bias`
+                  : 'No significant bias detected'
+              },
+              confidence: onboardResult.confidence,
+              processing_time: onboardResult.processing_time,
+              source: 'onboard-forced',
+              transcendent: false
+            };
+
+            Logger.info('[BG] ✨ FORCED ONBOARD RESULT:', {
+              bias_score: analysisResult.score,
+              bias_types: analysisResult.analysis.bias_types,
+              processing_time: analysisResult.processing_time
+            });
+
+          await saveToHistory(text, analysisResult);
+          
+          Logger.info('[BG] 📤 Sending onboard result to content script...');
+          try {
+            sendResponse(analysisResult);
+            Logger.info('[BG] ✅ Successfully sent onboard result');
+          } catch (sendError) {
+            Logger.error('[BG] ❌ Failed to send onboard result:', sendError);
+            // Try alternative response method
+            if (typeof sendResponse === 'function') {
+              sendResponse(analysisResult);
+            }
+          }
+          return;
+          } catch (forcedError) {
+            Logger.error('[BG] Forced onboard also failed:', forcedError);
+          }
         }
       }
 
