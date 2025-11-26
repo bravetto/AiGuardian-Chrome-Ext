@@ -135,46 +135,99 @@ class ExtensionPackager {
       archive.on('error', reject);
       archive.pipe(output);
 
-      // SAFETY: Only include files needed for Chrome Web Store
-      // Exclude: node_modules, .git, tests, scripts, docs, backups, etc.
-      
-      // 1. Manifest (required)
-      archive.file('manifest.json', { name: 'manifest.json' });
-      
-      // 2. Source files (extension code)
-      const srcPath = path.join(this.projectRoot, 'src');
-      if (fs.existsSync(srcPath)) {
-        const srcFiles = this.getAllFiles(srcPath);
-        srcFiles.forEach((file) => {
-          const relativePath = path.relative(this.projectRoot, file);
-          // Exclude backups, maps, and test files
-          if (
-            !relativePath.includes('.backup') &&
-            !relativePath.includes('.map') &&
-            !relativePath.includes('.test.') &&
-            !relativePath.includes('.spec.')
-          ) {
-            archive.file(file, { name: relativePath });
-          }
-        });
+    // SAFETY: Only include files needed for Chrome Web Store
+    // Exclude: node_modules, .git, tests, scripts, docs, backups, etc.
+
+    // 1. Manifest (required)
+    archive.file('manifest.json', { name: 'manifest.json' });
+
+    // 2. Only the specific source files needed for the extension
+    const requiredSrcFiles = [
+      'src/auth.js',
+      'src/cache-manager.js',
+      'src/circuit-breaker.js',
+      'src/clerk-bridge.js',
+      'src/constants.js',
+      'src/content.js',
+      'src/data-encryption.js',
+      'src/error-handler.js',
+      'src/gateway.js',
+      'src/input-validator.js',
+      'src/logging.js',
+      'src/mutex-helper.js',
+      'src/onboard/access-control.js',
+      'src/onboard/bias-detection.js',
+      'src/onboard/ml-bias-detection.js',
+      'src/onboard/transcendence.js',
+      'src/onboarding.js',
+      'src/options.html',
+      'src/options.js',
+      'src/popup.css',
+      'src/popup.html',
+      'src/popup.js',
+      'src/rate-limiter.js',
+      'src/service-worker.js',
+      'src/string-optimizer.js',
+      'src/subscription-service.js',
+      'src/vendor/clerk.js',
+      'src/vendor/tfjs.min.js',
+      'src/models/text-preprocessor.js',
+      'src/models/model-loader.js'
+    ];
+
+    requiredSrcFiles.forEach((filePath) => {
+      const fullPath = path.join(this.projectRoot, filePath);
+      if (fs.existsSync(fullPath)) {
+        archive.file(fullPath, { name: filePath });
       }
-      
-      // 3. Assets (only icons referenced in manifest - exclude brand book PDFs/images)
-      const assetsPath = path.join(this.projectRoot, 'assets');
-      if (fs.existsSync(assetsPath)) {
-        const assetFiles = this.getAllFiles(assetsPath);
-        assetFiles.forEach((file) => {
-          const relativePath = path.relative(this.projectRoot, file);
-          // Only include icon files (png, jpg, svg) - exclude brand book folders
-          if (
-            (relativePath.match(/\.(png|jpg|jpeg|svg|webp)$/i)) &&
-            !relativePath.includes('Brand Book') &&
-            !relativePath.includes('brand-book')
-          ) {
-            archive.file(file, { name: relativePath });
-          }
-        });
+    });
+
+    // 3. Only the specific icon files referenced in manifest
+    const requiredIcons = [
+      'assets/icons/icon-16.png',
+      'assets/icons/icon-19.png',
+      'assets/icons/icon-32.png',
+      'assets/icons/icon-38.png',
+      'assets/icons/icon-48.png',
+      'assets/icons/icon-128.png'
+    ];
+
+    requiredIcons.forEach((iconPath) => {
+      const fullPath = path.join(this.projectRoot, iconPath);
+      if (fs.existsSync(fullPath)) {
+        archive.file(fullPath, { name: iconPath });
       }
+    });
+
+    // 4. Only web_accessible_resources files (not entire onboarding-app)
+    const webAccessibleFiles = [
+      'src/vendor/clerk.js',
+      'src/vendor/tfjs.min.js',
+      'src/clerk-bridge.js',
+      'onboarding-app/index.html',
+      'onboarding-app/src/onboard/bias-detection.js',
+      'onboarding-app/src/onboard/transcendence.js'
+    ];
+
+    webAccessibleFiles.forEach((filePath) => {
+      const fullPath = path.join(this.projectRoot, filePath);
+      if (fs.existsSync(fullPath)) {
+        archive.file(fullPath, { name: filePath });
+      }
+    });
+
+    // 5. ML Models (flattened structure: models/models/ -> models/)
+    const modelFiles = [
+      { src: 'models/models/bias-detection-model.json', dest: 'models/bias-detection-model.json' },
+      { src: 'models/models/bias-detection-model.weights.bin', dest: 'models/bias-detection-model.weights.bin' }
+    ];
+
+    modelFiles.forEach((file) => {
+      const fullPath = path.join(this.projectRoot, file.src);
+      if (fs.existsSync(fullPath)) {
+        archive.file(fullPath, { name: file.dest });
+      }
+    });
 
       archive.finalize();
     });
@@ -218,19 +271,64 @@ class ExtensionPackager {
   }
 
   /**
-   * Get included files list
+   * Get included files list (only files actually packaged)
    */
   getIncludedFiles() {
     const files = [];
 
-    ['manifest.json', 'src', 'assets'].forEach((item) => {
-      const itemPath = path.join(this.projectRoot, item);
-      if (fs.existsSync(itemPath)) {
-        if (fs.statSync(itemPath).isDirectory()) {
-          files.push(...this.getAllFiles(itemPath).map((f) => path.relative(this.projectRoot, f)));
-        } else {
-          files.push(item);
-        }
+    // Only include files that were actually added to the zip
+    const includedFiles = [
+      'manifest.json',
+      // Only required source files
+      'src/auth.js',
+      'src/cache-manager.js',
+      'src/circuit-breaker.js',
+      'src/clerk-bridge.js',
+      'src/constants.js',
+      'src/content.js',
+      'src/data-encryption.js',
+      'src/error-handler.js',
+      'src/gateway.js',
+      'src/input-validator.js',
+      'src/logging.js',
+      'src/mutex-helper.js',
+      'src/onboard/access-control.js',
+      'src/onboard/bias-detection.js',
+      'src/onboard/ml-bias-detection.js',
+      'src/onboard/transcendence.js',
+      'src/onboarding.js',
+      'src/options.html',
+      'src/options.js',
+      'src/popup.css',
+      'src/popup.html',
+      'src/popup.js',
+      'src/rate-limiter.js',
+      'src/service-worker.js',
+      'src/string-optimizer.js',
+      'src/subscription-service.js',
+      'src/vendor/clerk.js',
+      'src/vendor/tfjs.min.js',
+      'src/models/text-preprocessor.js',
+      'src/models/model-loader.js',
+      // Only required icons
+      'assets/icons/icon-16.png',
+      'assets/icons/icon-19.png',
+      'assets/icons/icon-32.png',
+      'assets/icons/icon-38.png',
+      'assets/icons/icon-48.png',
+      'assets/icons/icon-128.png',
+      // Only web_accessible_resources files
+      'onboarding-app/index.html',
+      'onboarding-app/src/onboard/bias-detection.js',
+      'onboarding-app/src/onboard/transcendence.js',
+      'models/bias-detection-model.json',
+      'models/bias-detection-model.weights.bin'
+    ];
+
+    includedFiles.forEach((filePath) => {
+      const fullPath = path.join(this.projectRoot, filePath);
+      if (fs.existsSync(fullPath)) {
+        files.push(filePath);
       }
     });
 

@@ -19,9 +19,27 @@ try {
   importScripts('circuit-breaker.js');
   importScripts('subscription-service.js');
   importScripts('gateway.js');
-  // Load onboard transcendent modules
+  // Load TensorFlow.js first (required for ML model)
   try {
-    importScripts('onboard/bias-detection.js');
+    importScripts('vendor/tfjs.min.js');
+    Logger.info('[BG] TensorFlow.js loaded');
+  } catch (e) {
+    Logger.warn('[BG] TensorFlow.js not available:', e);
+  }
+  
+  // Load ML model support modules
+  try {
+    importScripts('models/text-preprocessor.js');
+    importScripts('models/model-loader.js');
+    Logger.info('[BG] ML model support modules loaded');
+  } catch (e) {
+    Logger.warn('[BG] ML model support modules not available:', e);
+  }
+  
+  // Load onboard transcendent modules (including ML bias detection)
+  try {
+    importScripts('onboard/bias-detection.js'); // Keep for fallback
+    importScripts('onboard/ml-bias-detection.js'); // ML-based detection
     importScripts('onboard/transcendence.js');
     importScripts('onboard/access-control.js');
     Logger.info('[BG] Onboard transcendent modules loaded');
@@ -720,24 +738,37 @@ try {
       let useOnboard = false;
       let accessControl = null;
       
-      // Hybrid Cost-Saving Strategy:
-      // 1. Prioritize Onboard Mode (Local) to save backend costs and latency
-      // 2. Fall back to Backend only if Onboard fails or isn't available
+      // Feature Flag Check: Embedded Mode (v1.0.0)
+      // If embedded mode is forced, we skip all backend checks and use local ML/Regex only
+      // BUT if authentication is required, we must check it first
+      const useEmbeddedModel = typeof FEATURE_FLAGS !== 'undefined' && FEATURE_FLAGS.USE_EMBEDDED_MODEL;
+      const requireAuth = typeof FEATURE_FLAGS !== 'undefined' && FEATURE_FLAGS.BACKEND_AUTH_ENABLED;
+      
+      // Hybrid Cost-Saving Strategy with ML Model:
+      // 1. Prioritize ML Model (Local, Most Accurate) - offline processing
+      // 2. Fall back to Regex-based detection if ML model unavailable
+      // 3. Fall back to Backend only if both local methods fail (AND embedded mode is NOT forced)
+      const useMLModel = typeof MLBiasDetection !== 'undefined' && typeof tf !== 'undefined';
       useOnboard = typeof OnboardBiasDetection !== 'undefined';
       
-      Logger.info('[BG] 🔄 Hybrid Mode Active:', {
-        strategy: 'Local First (Cost Saving)',
+      Logger.info('[BG] 🔄 Analysis Strategy:', {
+        strategy: useEmbeddedModel ? 'Embedded First (Local ML)' : 'Hybrid (ML First)',
+        useEmbeddedModel: useEmbeddedModel,
+        requireAuth: requireAuth,
+        useMLModel: useMLModel,
         useOnboard: useOnboard,
         modulesAvailable: {
+            MLBiasDetection: typeof MLBiasDetection !== 'undefined',
+            TensorFlowJS: typeof tf !== 'undefined',
             OnboardBiasDetection: typeof OnboardBiasDetection !== 'undefined',
             TranscendentAccessControl: typeof TranscendentAccessControl !== 'undefined',
             TranscendenceCalculator: typeof TranscendenceCalculator !== 'undefined'
         }
       });
 
-      // Still check access control for logging purposes
-      if (typeof TranscendentAccessControl !== 'undefined') {
-        Logger.info('[BG] 🔍 TranscendentAccessControl class is available');
+      // Check access control if required (even for embedded mode)
+      if (requireAuth && typeof TranscendentAccessControl !== 'undefined') {
+        Logger.info('[BG] 🔍 Checking access control (Auth Required)...');
         accessControl = new TranscendentAccessControl();
         const accessCheck = await accessControl.checkTranscendentAccess();
 
@@ -746,33 +777,149 @@ try {
           reason: accessCheck.reason,
           message: accessCheck.message,
           transcendent: accessCheck.transcendent,
-          allKeys: Object.keys(accessCheck)
+          embedded: accessCheck.embedded
         });
 
-        if (accessCheck.hasAccess && accessCheck.transcendent) {
-          Logger.info('[BG] ✨ Transcendent access also available');
-        } else {
-          Logger.info('[BG] 📝 Backend access not available, using onboard mode');
+        if (!accessCheck.hasAccess) {
+          Logger.warn('[BG] ⛔ Access denied:', accessCheck.message);
+          sendResponse({
+            success: false,
+            error: accessCheck.message || 'Authentication required',
+            errorCode: accessCheck.reason === 'not_authenticated' ? 'AUTH_REQUIRED' : 'ACCESS_DENIED',
+            actionable: true
+          });
+          return;
         }
+        
+        Logger.info('[BG] ✅ Access granted');
+      } else if (typeof TranscendentAccessControl !== 'undefined') {
+        // If auth not required but class available, check anyway for logging
+        Logger.info('[BG] 🔍 TranscendentAccessControl class is available (Auth Optional)');
+        accessControl = new TranscendentAccessControl();
+        await accessControl.checkTranscendentAccess();
       } else {
         Logger.warn('[BG] ⚠️ TranscendentAccessControl class not available');
       }
 
-      // Use onboard detection if available and user has access
-      Logger.info('[BG] 🔍 Checking onboard availability:', {
+      // Try ML model first (most accurate, fully offline)
+      if ((useEmbeddedModel || useMLModel) && typeof MLBiasDetection !== 'undefined') {
+        Logger.info('[BG] 🤖 Starting ML-based detection...');
+        try {
+          Logger.info('[BG] 📝 Creating MLBiasDetection instance...');
+          const mlDetector = new MLBiasDetection({
+            modelPath: 'models/bias-detection-model.json',
+            fallbackToRegex: true
+          });
+          Logger.info('[BG] ✅ MLBiasDetection instance created');
+          
+          Logger.info('[BG] 📊 Running ML bias detection on text...');
+          const mlResult = await mlDetector.detectBias(text);
+          
+          // Check if ML detection succeeded
+          if (mlResult && mlResult.success && mlResult.source === 'onboard-ml') {
+            Logger.info('[BG] ✅ ML bias detection completed:', {
+              success: mlResult.success,
+              bias_score: mlResult.bias_score,
+              bias_types: mlResult.bias_types,
+              confidence: mlResult.confidence
+            });
+            
+            // Calculate transcendence if available
+            let transcendenceData = null;
+            if (typeof TranscendenceCalculator !== 'undefined') {
+              const transcendenceCalc = new TranscendenceCalculator();
+              transcendenceData = transcendenceCalc.calculateTranscendence(mlResult);
+            }
+            
+            // Format result to match backend format
+            const analysisResult = {
+              success: true,
+              score: mlResult.bias_score,
+              analysis: {
+                bias_types: mlResult.bias_types,
+                bias_details: mlResult.bias_details,
+                mitigation_suggestions: mlResult.mitigation_suggestions,
+                fairness_score: mlResult.fairness_score,
+                summary: mlResult.bias_types.length > 0 
+                  ? `Detected ${mlResult.bias_types.join(', ')} bias (ML)`
+                  : 'No significant bias detected (ML)'
+              },
+              confidence: mlResult.confidence,
+              processing_time: mlResult.processing_time,
+              source: 'onboard-ml',
+              transcendent: true,
+              transcendence: transcendenceData
+            };
+            
+            Logger.info('[BG] ✨ ML RESULT (Transcendent):', {
+              bias_score: analysisResult.score,
+              bias_types: analysisResult.analysis.bias_types,
+              transcendence_level: transcendenceData?.level,
+              processing_time: analysisResult.processing_time
+            });
+            
+            // Save to history
+            await saveToHistory(text, analysisResult);
+
+            Logger.info('[BG] 📤 Sending ML result to content script...', {
+              hasResult: !!analysisResult,
+              resultKeys: Object.keys(analysisResult),
+              success: analysisResult.success,
+              score: analysisResult.score
+            });
+
+            try {
+              sendResponse(analysisResult);
+              Logger.info('[BG] ✅ Successfully sent ML result');
+            } catch (sendError) {
+              Logger.error('[BG] ❌ Failed to send ML result:', sendError);
+            }
+
+            // Store last analysis in background after response is sent
+            chrome.storage.local.set({
+              last_analysis: {
+                score: analysisResult.score,
+                timestamp: new Date().toISOString(),
+                summary: analysisResult.analysis.summary,
+                success: true,
+                transcendent: true,
+                transcendence_level: transcendenceData?.level,
+                source: 'ml'
+              }
+            }, () => {
+               if (chrome.runtime.lastError) {
+                 Logger.warn('[BG] Error storing last_analysis (non-critical):', chrome.runtime.lastError);
+               } else {
+                 Logger.info('[BG] ✅ Stored last_analysis in local storage');
+               }
+            });
+            
+            return;
+          } else {
+            // ML detection returned but may have fallen back to regex
+            Logger.info('[BG] ML detection completed but may have used fallback');
+          }
+        } catch (mlError) {
+          Logger.warn('[BG] ML detection failed, falling back to regex:', mlError);
+          // Fall through to regex-based detection
+        }
+      }
+
+      // Use regex-based onboard detection as fallback
+      Logger.info('[BG] 🔍 Checking regex-based onboard availability:', {
         useOnboard: useOnboard,
         OnboardBiasDetectionAvailable: typeof OnboardBiasDetection !== 'undefined',
         textLength: text?.length || 0
       });
 
       if (useOnboard && typeof OnboardBiasDetection !== 'undefined') {
-        Logger.info('[BG] 🚀 Starting onboard detection...');
+        Logger.info('[BG] 🚀 Starting regex-based onboard detection...');
         try {
           Logger.info('[BG] 📝 Creating OnboardBiasDetection instance...');
           const onboardDetector = new OnboardBiasDetection();
           Logger.info('[BG] ✅ OnboardBiasDetection instance created');
           
-          Logger.info('[BG] 📊 Running bias detection on text...');
+          Logger.info('[BG] 📊 Running regex bias detection on text...');
           const onboardResult = onboardDetector.detectBias(text);
           Logger.info('[BG] ✅ Bias detection completed:', {
             success: onboardResult?.success,
@@ -905,6 +1052,20 @@ try {
             Logger.error('[BG] Forced onboard also failed:', forcedError);
           }
         }
+      }
+
+      // If forced embedded mode, stop here (unless we want to allow backend fallback even then?)
+      // With hybrid approach, we might want to allow backend fallback if ML fails, 
+      // but for "Embedded Mode" we strictly stick to local.
+      if (useEmbeddedModel) {
+        Logger.info('[BG] 🛑 Embedded mode active - skipping backend fallback');
+        sendResponse({
+          success: false,
+          error: 'Analysis failed (Embedded Mode)',
+          errorCode: 'EMBEDDED_ANALYSIS_FAILED',
+          actionable: false
+        });
+        return;
       }
 
       // Ensure gateway is initialized for backend mode

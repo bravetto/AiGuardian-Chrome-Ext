@@ -1,0 +1,4 @@
+[submodule "models"]
+	path = models
+	url = https://github.com/Jimmy-Dejesus/bias-detection-model
+	branch = main

@@ -112,3 +112,6 @@ logs
 
 # Agent suite (embedded repository)
 agentsuite/*.backup
+
+# ML Model artifacts
+src/models/
