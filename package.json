@@ -43,10 +43,7 @@
     "type": "git",
     "url": "https://github.com/bravetto/abe-core-body-template.git"
   },
-  "dependencies": {
-    "@bravetto/abe-core-brain": "file:../abe-core-brain",
-    "@bravetto/abe-consciousness": "file:../abe-consciousness"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@types/node": "^20.0.0",
     "@types/react": "^18.3.0",

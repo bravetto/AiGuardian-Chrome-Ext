@@ -13,7 +13,7 @@
 import { useState } from 'react';
 import { apiClient } from '@/lib/api-client';
 import { API_ENDPOINTS } from '@shared/constants/endpoints';
-import type { CreateUserRequest, ApiResponse, User } from '@shared/types/api';
+import type { CreateUserRequest, User } from '@shared/types/api';
 import { validateUserInput } from '@shared/utils/validation';
 
 export function ExampleComponent() {
@@ -33,13 +33,14 @@ export function ExampleComponent() {
 
     try {
       const userData: CreateUserRequest = { name, email };
-      const response = await apiClient.post<ApiResponse<User>>(
+      const response = await apiClient.post<User>(
         API_ENDPOINTS.USERS,
         userData
       );
 
       if (response.success && response.data) {
-        setMessage(`Success! Created user: ${response.data.name}`);
+        const user = response.data;
+        setMessage(`Success! Created user: ${user.name}`);
         setName('');
         setEmail('');
       } else {

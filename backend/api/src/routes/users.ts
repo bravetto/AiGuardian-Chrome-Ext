@@ -10,7 +10,7 @@
 
 import { Router } from 'express';
 import { userService } from '../services/user.service';
-import type { CreateUserRequest, GetUserRequest } from '../../../shared/types/api';
+import type { CreateUserRequest, GetUserRequest } from '@shared/types/api';
 
 const router = Router();
 
