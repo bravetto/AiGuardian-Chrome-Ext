@@ -1,0 +1,62 @@
+{
+  "name": "@aiguardian/bias-detection-models",
+  "version": "2.0.0",
+  "description": "ML models and enhanced pattern matching for AI Guardian bias detection",
+  "main": "bias-detection/enhanced-bias-detection.js",
+  "type": "module",
+  "scripts": {
+    "test": "NODE_OPTIONS='--experimental-vm-modules' npx jest tests/enhanced-bias-detection.test.js",
+    "test:patterns": "node tests/pattern-matching.test.js",
+    "test:contextual": "node tests/contextual-scoring.test.js",
+    "test:graduated": "node tests/graduated-scoring.test.js",
+    "train": "node training/train-bias-model.js",
+    "validate": "node training/validate-ml-model.js",
+    "benchmark": "node scripts/benchmark-detection.js",
+    "lint": "eslint . --ext .js",
+    "build": "node scripts/build-models.js"
+  },
+  "keywords": [
+    "bias-detection",
+    "machine-learning",
+    "tensorflow-js",
+    "pattern-matching",
+    "fairness",
+    "ai-ethics",
+    "chrome-extension"
+  ],
+  "author": "AI Guardian Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aiguardian/bias-detection-models.git"
+  },
+  "dependencies": {
+    "@tensorflow/tfjs": "^4.10.0",
+    "@tensorflow/tfjs-node": "^4.10.0"
+  },
+  "devDependencies": {
+    "jest": "^29.0.0",
+    "eslint": "^8.0.0",
+    "benchmark": "^2.1.4"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "files": [
+    "bias-detection/",
+    "training/",
+    "scripts/",
+    "README.md",
+    "package.json"
+  ],
+  "exports": {
+    ".": "./bias-guard.js",
+    "./bias-guard": "./bias-guard.js",
+    "./enhanced-detection": "./bias-detection/enhanced-bias-detection.js",
+    "./patterns": "./bias-detection/patterns.js",
+    "./contextual-scoring": "./bias-detection/contextual-scoring.js",
+    "./graduated-scoring": "./bias-detection/graduated-scoring.js",
+    "./model-loader": "./bias-detection/model-loader.js",
+    "./text-preprocessor": "./bias-detection/text-preprocessor.js"
+  }
+}
