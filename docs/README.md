@@ -50,6 +50,7 @@ Standalone ML model development, training, and comprehensive testing documentati
 |- **[regression-summary.md](../models/regression-summary.md)** - Testing framework and QA results (100% coverage)
 |- **[run-all-tests.js](../models/run-all-tests.js)** - Automated test orchestration
 |- **[SETUP.md](../models/SETUP.md)** - Environment setup for model development
+|- **[bias-guard.js](../models/bias-guard.js)** - Unified BiasGuard interface for all detection strategies
 
 ### 🚀 [releases/](./releases/)
 PR summaries, release notes, and deployment documentation.

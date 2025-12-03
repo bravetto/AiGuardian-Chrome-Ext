@@ -4,6 +4,7 @@ AI Guardian is a Chrome extension that provides real-time bias detection and ana
 
 ## 🚀 Features
 
+- **Unified BiasGuard Interface**: Single entry point for all bias detection with automatic fallback strategies
 - **Real-time Bias Detection**: Analyzes text for potential bias using advanced ML models with edge case handling
 - **Embedded ML Model**: Runs entirely offline/locally for privacy and speed with improved accuracy (v2.0.0)
 - **Comprehensive Testing**: 100% regression test coverage with automated edge case validation
@@ -80,8 +81,9 @@ node run-all-tests.js improved   # Enhanced detector testing
 
 ### Enhanced Architecture (v2.0.0)
 
-This version operates in **Enhanced Embedded Mode** with significant improvements:
+This version operates in **BiasGuard Unified Mode** with significant improvements:
 
+- **Unified BiasGuard Interface**: Single entry point with automatic fallback strategies
 - **Advanced ML Pipeline**: TensorFlow.js model with improved preprocessing and post-processing
 - **Edge Case Robustness**: Handles URLs, HTML, special characters, and malformed content
 - **Quality Assurance**: Comprehensive testing framework with 100% regression coverage
@@ -92,8 +94,18 @@ This version operates in **Enhanced Embedded Mode** with significant improvement
 ```
 AiGuardian-Chrome-Ext/
 ├── src/                    # Extension source code
-├── models/                 # ML model and testing framework
+│   ├── models/            # Synced ML model files for extension
+│   │   ├── bias-guard.js  # Unified detection interface
+│   │   ├── enhanced-bias-detection.js
+│   │   └── ...
+│   └── onboard/           # ML bias detection integration
+├── models/                 # ML model repository (git submodule)
+│   ├── bias-guard.js      # Unified BiasGuard interface
 │   ├── bias-detection/     # Core detection algorithms
+│   │   ├── enhanced-bias-detection.js
+│   │   ├── contextual-scoring.js
+│   │   ├── patterns.js
+│   │   └── ...
 │   ├── training/          # Model training infrastructure
 │   ├── *-tests.js         # Comprehensive test suites
 │   └── run-all-tests.js   # Test orchestration

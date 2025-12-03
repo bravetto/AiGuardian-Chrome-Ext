@@ -9,13 +9,13 @@ The AI Guardian Chrome extension implements a **hybrid dual-mode architecture** 
 ### 🔄 Hybrid Processing Model (v2.0.0)
 The extension operates in two primary modes:
 
-1. **Enhanced Embedded Mode** (Primary): Advanced ML model + comprehensive pattern matching + edge case robustness
+1. **BiasGuard Unified Mode** (Primary): Unified interface with automatic fallback strategies + edge case robustness
 2. **Backend Mode** (Fallback): AWS-powered full analysis suite
 
-### 🧠 Intelligence Hierarchy (Enhanced v2.0.0)
-Analysis follows a cascading fallback strategy with enhanced edge case handling:
+### 🧠 Intelligence Hierarchy (BiasGuard v2.0.0)
+Analysis follows a unified BiasGuard interface with cascading fallback strategy:
 ```
-Enhanced ML Model (Fastest, Robust) → Advanced Pattern Detection (100+ patterns) → Backend API (Comprehensive)
+BiasGuard Interface → Enhanced ML Engine → Advanced Patterns → Improved Detector → Neutral Results → Backend API
 ```
 
 ### 🔐 Authentication Strategy
@@ -129,10 +129,12 @@ Service Worker receives ANALYZE_TEXT message
 Check Feature Flags & Authentication
         ↓
 Execute Analysis Strategy:
-├── Enhanced Embedded Mode (Default - v2.0.0)
-│   ├── Try Enhanced ML Model Inference (Edge case robust)
-│   │   └── Fallback: Advanced Pattern Detection (100+ patterns)
-│   └── Results: Local processing with quality validation
+├── BiasGuard Unified Mode (Default - v2.0.0)
+│   ├── BiasGuard.analyzeText() (Unified Interface)
+│   │   ├── Enhanced ML Engine (Primary)
+│   │   ├── Improved Detector (Edge Cases)
+│   │   └── Neutral Results (Final Fallback)
+│   └── Results: Standardized output with transparency
 │
 └── Backend Mode (If embedded disabled/fails)
     ├── Validate Authentication
@@ -247,20 +249,26 @@ const FEATURE_FLAGS = {
 
 ## Error Handling & Recovery
 
-### Enhanced Graceful Degradation (v2.0.0)
+### BiasGuard Graceful Degradation (v2.0.0)
 ```
 Analysis Request
         ↓
-Try Enhanced ML Model (Edge case handling)
+BiasGuard.analyzeText() (Unified Interface)
         ↓
-├── Success → Quality validation → Return enhanced results
-└── Failure → Try advanced pattern detection (100+ patterns)
-        ↓
-    ├── Success → Confidence scoring → Return results
-    └── Failure → Try backend API (if available)
-        ↓
-        ├── Success → Return comprehensive results
-        └── Failure → Show user-friendly error with suggestions
+├── Enhanced ML Engine (Primary Strategy)
+│   ├── Success → Quality validation → Return enhanced results
+│   └── Failure → Continue to next strategy
+│
+├── Improved Detector (Edge Case Strategy)
+│   ├── Success → Edge case handling → Return results
+│   └── Failure → Continue to final fallback
+│
+├── Neutral Results (Final Fallback)
+│   └── Always succeeds → Return safe neutral analysis
+│
+└── Backend API (External Fallback - if enabled)
+    ├── Success → Return comprehensive results
+    └── Failure → Show user-friendly error with suggestions
 ```
 
 ### Error Classification
