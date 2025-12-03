@@ -9,12 +9,14 @@
 
 class MLBiasDetection {
   constructor(options = {}) {
+    this.biasGuard = null;
     this.engine = null;
     this.regexDetector = null;
     this.initialized = false;
     this.initializationPromise = null;
     this.options = {
-      modelPath: options.modelPath || 'models/bias-detection/enhanced-bias-detection.js',
+      enableCache: options.enableCache !== false,
+      minConfidence: options.minConfidence || 0.4,
       enableML: options.enableML !== false,
       fallbackToRegex: options.fallbackToRegex !== false,
       enableTransparency: options.enableTransparency !== false,
@@ -26,8 +28,8 @@ class MLBiasDetection {
    * Initialize the enhanced bias detection system
    */
   async initialize() {
-    if (this.initialized && this.engine) {
-      return this.engine;
+    if (this.initialized && (this.biasGuard || this.engine)) {
+      return this.biasGuard || this.engine;
     }
 
     if (this.initializationPromise) {
@@ -37,9 +39,9 @@ class MLBiasDetection {
     this.initializationPromise = this._initializeInternal();
 
     try {
-      this.engine = await this.initializationPromise;
+      const result = await this.initializationPromise;
       this.initialized = true;
-      return this.engine;
+      return result;
     } catch (error) {
       this.initializationPromise = null;
       if (typeof Logger !== 'undefined') {
@@ -50,11 +52,50 @@ class MLBiasDetection {
   }
 
   /**
+   * Try BiasGuard unified interface
+   */
+  async _tryBiasGuard(text, metadata, startTime) {
+    if (!this.biasGuard || !this.biasGuard.analyzeText) {
+      return null;
+    }
+
+    try {
+      const result = await this.biasGuard.analyzeText(text);
+      if (result.success && result.confidence >= this.options.minConfidence) {
+        return this._formatBiasGuardResult(result, startTime);
+      }
+    } catch (error) {
+      if (typeof Logger !== 'undefined') {
+        Logger.warn('[MLBiasDetection] BiasGuard failed:', error.message);
+      }
+    }
+    return null;
+  }
+
+  /**
    * Internal initialization logic
    */
   async _initializeInternal() {
     try {
-      // Try to load enhanced bias detection engine
+      // Try to load BiasGuard first (unified interface)
+      if (this.options.enableML && typeof BiasGuard !== 'undefined') {
+        try {
+          this.biasGuard = new BiasGuard(this.options);
+          await this.biasGuard.initialize();
+
+          if (typeof Logger !== 'undefined') {
+            Logger.info('[MLBiasDetection] BiasGuard loaded successfully');
+          }
+
+          return this.biasGuard;
+        } catch (error) {
+          if (typeof Logger !== 'undefined') {
+            Logger.warn('[MLBiasDetection] BiasGuard initialization failed, falling back:', error.message);
+          }
+        }
+      }
+
+      // Fallback to enhanced bias detection engine
       if (this.options.enableML) {
         try {
           // Use globally available enhanced engine (loaded via importScripts in service worker)
@@ -243,6 +284,7 @@ class MLBiasDetection {
 
       // Try detection strategies in order of preference
       const strategies = [
+        () => this._tryBiasGuard(text, metadata, startTime),
         () => this._tryEnhancedEngine(text, metadata, startTime),
         () => this._tryMLModel(text, metadata, startTime),
         () => this._tryRegexFallback(text, metadata, startTime)
@@ -506,6 +548,46 @@ class MLBiasDetection {
       context: result.context,
       evidence_type: result.evidence_type,
       pattern_matches: result.pattern_matches || 0,
+      transparency: this.options.enableTransparency ? result.transparency : undefined
+    };
+  }
+
+  /**
+   * Format BiasGuard result for compatibility
+   */
+  _formatBiasGuardResult(result, startTime) {
+    const biasScore = result.bias_score;
+    const biasDetected = result.bias_detected;
+
+    // Create bias details from detected types
+    const biasDetails = {};
+    if (result.bias_types && result.bias_types.length > 0) {
+      result.bias_types.forEach(type => {
+        biasDetails[type] = biasScore / result.bias_types.length;
+      });
+    }
+
+    // Generate mitigation suggestions based on bias types
+    const suggestions = this._generateMitigationSuggestions(result.bias_types);
+
+    // Calculate fairness score (inverse of bias score)
+    const fairnessScore = Math.max(0, Math.min(1, 1.0 - biasScore * 0.8));
+
+    const processingTime = performance.now() - startTime;
+
+    return {
+      success: true,
+      bias_detected: biasDetected,
+      bias_score: biasScore,
+      bias_types: result.bias_types || [],
+      bias_details: biasDetails,
+      mitigation_suggestions: suggestions,
+      fairness_score: fairnessScore,
+      confidence: result.confidence || 0.5,
+      processing_time: processingTime,
+      source: `bias-guard-${result.source}`,
+      transcendent: true,
+      evidence_type: result.evidence_type,
       transparency: this.options.enableTransparency ? result.transparency : undefined
     };
   }

@@ -27,17 +27,12 @@ try {
     Logger.warn('[BG] TensorFlow.js not available:', e);
   }
   
-  // Load ML model support modules
+  // Load unified BiasGuard interface
   try {
-    importScripts('models/text-preprocessor.js');
-    importScripts('models/model-loader.js');
-    importScripts('models/bias-detection/enhanced-bias-detection.js');
-    importScripts('models/bias-detection/contextual-scoring.js');
-    importScripts('models/bias-detection/graduated-scoring.js');
-    importScripts('models/bias-detection/patterns.js');
-    Logger.info('[BG] ML model support modules loaded');
+    importScripts('models/bias-guard.js');
+    Logger.info('[BG] BiasGuard loaded successfully');
   } catch (e) {
-    Logger.warn('[BG] ML model support modules not available:', e);
+    Logger.warn('[BG] BiasGuard not available:', e);
   }
   
   // Load onboard transcendent modules (including ML bias detection)

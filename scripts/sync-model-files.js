@@ -9,19 +9,20 @@ const fs = require('fs');
 const path = require('path');
 
 const modelsRoot = path.join(__dirname, '..', 'models');
-const modelDataDir = path.join(modelsRoot, 'src', 'models');
-const biasDetectionDir = path.join(modelsRoot, 'models', 'bias-detection');
+const biasDetectionDir = path.join(modelsRoot, 'bias-detection');
 const targetDir = path.join(__dirname, '..', 'src', 'models');
 
 // Files to sync with their source directories
 const filesToSync = [
   {
-    name: 'bias-detection-model.json',
-    sourceDir: modelDataDir
+    name: 'model.json',
+    sourceDir: biasDetectionDir,
+    targetName: 'bias-detection-model.json'
   },
   {
-    name: 'bias-detection-model.weights.bin',
-    sourceDir: modelDataDir
+    name: 'model.weights.bin',
+    sourceDir: biasDetectionDir,
+    targetName: 'bias-detection-model.weights.bin'
   },
   {
     name: 'text-preprocessor.js',
@@ -30,6 +31,26 @@ const filesToSync = [
   {
     name: 'model-loader.js',
     sourceDir: biasDetectionDir
+  },
+  {
+    name: 'enhanced-bias-detection.js',
+    sourceDir: biasDetectionDir
+  },
+  {
+    name: 'patterns.js',
+    sourceDir: biasDetectionDir
+  },
+  {
+    name: 'contextual-scoring.js',
+    sourceDir: biasDetectionDir
+  },
+  {
+    name: 'constants.js',
+    sourceDir: biasDetectionDir
+  },
+  {
+    name: 'bias-guard.js',
+    sourceDir: modelsRoot
   }
 ];
 
@@ -45,12 +66,13 @@ function syncModelFiles() {
 
   for (const fileInfo of filesToSync) {
     const sourcePath = path.join(fileInfo.sourceDir, fileInfo.name);
-    const targetPath = path.join(targetDir, fileInfo.name);
+    const targetName = fileInfo.targetName || fileInfo.name;
+    const targetPath = path.join(targetDir, targetName);
 
     try {
       if (fs.existsSync(sourcePath)) {
         fs.copyFileSync(sourcePath, targetPath);
-        console.log(`✅ Copied ${fileInfo.name} from ${path.relative(modelsRoot, fileInfo.sourceDir)}`);
+        console.log(`✅ Copied ${fileInfo.name} → ${targetName} from ${path.relative(modelsRoot, fileInfo.sourceDir)}`);
         syncedCount++;
       } else {
         console.log(`⚠️  Source file not found: ${sourcePath}`);
